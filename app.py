@@ -10,8 +10,14 @@ app = FastAPI(title="Simple yfinance API")
 @app.get("/prices/{ticker}/{start_date}/{end_date}")
 def read_prices(ticker: str, start_date: date, end_date: date):
     """HTTP GET returns history of ticker data as JSON"""
+
+    if start_date > end_date:
+        raise HTTPException(400, detail="start_date after end date")
+
     try:
         df = get_price_data(ticker, start_date, end_date)
+        if df.empty:
+            raise HTTPException(404, detail=f"No data for {ticker}")
     except Exception as e:
         raise HTTPException(status_code=404, detail=str(e))
 
