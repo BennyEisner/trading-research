@@ -3,68 +3,17 @@ from datetime import date, timedelta
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from fetch_data import get_price_data
+from pipeline.fetch_data import get_price_data
 from pipeline.load import store_prices_and_returns
 
 # Set up database
-engine = create_engine("sqlite+aiosqlite:///./returns.db", ec=False)
+engine = create_engine("sqlite:///./returns.db", echo=False)
 SessionLocal = sessionmaker(bind=engine)
 
 
 def main():
     # Can adjust later, these are just top 50 by market cap from gpt
-    tickers = [
-        "AAPL",
-        "MSFT",
-        "GOOG",
-        "AMZN",
-        "META",
-        "TSLA",
-        "NVDA",
-        "BRK-B",
-        "V",
-        "MA",
-        "JNJ",
-        "JPM",
-        "WMT",
-        "PG",
-        "HD",
-        "DIS",
-        "BAC",
-        "XOM",
-        "PFE",
-        "KO",
-        "INTC",
-        "VZ",
-        "UNH",
-        "T",
-        "CSCO",
-        "ORCL",
-        "ABBV",
-        "CVX",
-        "MRK",
-        "NKE",
-        "MCD",
-        "COST",
-        "TMUS",
-        "PEP",
-        "ADBE",
-        "CRM",
-        "NFLX",
-        "SBUX",
-        "ABT",
-        "ACN",
-        "MDT",
-        "HON",
-        "IBM",
-        "WFC",
-        "AMGN",
-        "TXN",
-        "LLY",
-        "AVGO",
-        "UPS",
-        "MMM",
-    ]
+    tickers = ["AAPL", "MSFT", "GOOG", "AMZN", "META", "TSLA", "NVDA"]
     end = date.today()
     start = end - timedelta(days=365)
     session = SessionLocal()
