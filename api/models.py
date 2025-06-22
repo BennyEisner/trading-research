@@ -1,7 +1,7 @@
 import enum
 
 from sqlalchemy import (Column, Date, DateTime, Enum, Float, ForeignKey,
-                        Integer, String, Text, create_engine)
+                        Integer, String, Text, UniqueConstraint, create_engine)
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
 Base = declarative_base()
@@ -39,9 +39,7 @@ class PriceData(Base):
     volume = Column(Float)
 
     ticker = relationship("Ticker", back_populates="prices")
-    return_record = relationship(
-        "ReturnData", back_populates="price", uselist=False
-    )  # uselist=False ensures only 1 return per price for return_record
+    return_record = relationship("ReturnData", back_populates="price", uselist=False)
 
 
 # Computes daily return for each symbol
@@ -56,6 +54,10 @@ class ReturnData(Base):
 
     ticker = relationship("Ticker", back_populates="returns")
     price = relationship("PriceData", back_populates="return_record", uselist=False)
+
+    __table_args__ = (
+        UniqueConstraint("ticker_symbol", "date", name="unique_ticker_date"),
+    )
 
 
 # Tracks each execution of ETL pipeline
