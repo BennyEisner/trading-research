@@ -1,12 +1,21 @@
 from datetime import date
 
 from fastapi import Depends, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
-from api.models import ReturnData
+from api.models import ReturnData, Ticker
 from pipeline.run import SessionLocal
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 def get_db():
@@ -39,3 +48,18 @@ def read_returns(
 
     data = [{"date": r.date, "daily_return": r.daily_return} for r in rows]
     return {"symbol": ticker, "returns": data}
+
+
+@app.get("/tickers")
+def get_tickers(db: Session = Depends(get_db)):
+    tickers = db.query(Ticker).all()
+    return [{"symbol": t.symbol, "name": t.name, "sector": t.sector} for t in tickers]
+
+
+@app.get("/tickers/{symbol}")
+def get_ticker(symbol: str, db: Session = Depends(get_db)):
+    ticker = db.query(Ticker).filter(Ticker.symbol == symbol).first()
+    if not ticker:
+        raise HTTPException(404, f"Ticker {symbol} not found")
+
+    return {"symbol": ticker.symbol, "name": ticker.name, "sector": ticker.sector}
