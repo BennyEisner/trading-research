@@ -50,7 +50,7 @@ if (loading) {
             key={ticker.symbol}
             onClick={() => handleTickerSelect(ticker)}
           >
-            {ticker.symbol}
+            {ticker.symbol} {ticker.name ? `(${ticker.name})` : ''}
           </button>
         ))}
       </div>
@@ -61,6 +61,9 @@ if (loading) {
           <div>{selectedTicker.symbol}</div>
           {selectedTicker.name && (
             <div>{selectedTicker.name}</div>
+          )}
+          {selectedTicker.sector && (
+            <div>Sector: {selectedTicker.sector}</div>
           )}
         </div>
       )}
