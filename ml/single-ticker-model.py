@@ -218,7 +218,7 @@ print(f"  All features: {scaled_features.min():.3f} to {scaled_features.max():.3
 
 # Create separate scaler for close price only (for inverse transformation)
 close_scaler = MinMaxScaler(feature_range=(0, 1))
-close_prices_scaled = close_scaler.fit_transform(stock_data[['close']].values)
+close_prices_scaled = close_scaler.fit_transform(stock_data[["close"]].values)
 
 print("Scalers created:")
 print(f"  Main scaler: handles {len(feature_columns)} features")
@@ -233,16 +233,39 @@ print(
 
 
 # Create sequences for training
-def create_sequences(data, lookback_window, target_col_idx=3):  # close at index 3
+def create_sequences(
+    data, lookback_window, target_col_idx=3, forecast_horizon=1
+):  # close at index 3
     X, y = [], []
-    for i in range(lookback_window, len(data)):
-        X.append(data[i - lookback_window : i, :])
-        y.append(data[i, target_col_idx])
+    for i in range(lookback_window, len(data) - forecast_horizon + 1):
+        X.append(
+            data[i - lookback_window : i, :]
+        )  # Input sequence: lookback window days of all features
+        y.append(
+            data[i + forecast_horizon - 1, target_col_idx]
+        )  # Target: next days close price
+
     return np.array(X), np.array(y)
 
 
 # Set sequence length
-lookback_window = 150
+lookback_window = 120
+
+
+def create_time_series_split(X, y, train_ratio=0.7, validation_ratio=0.15):
+    n_samples = len(X)
+    train_end = int(n_samples * train_ratio)
+    validation_end = int(n_samples * (train_ratio + validation_ratio))
+
+    X_train = X[:train_end]
+    y_train = y[:train_end]
+    X_val = X[train_end:validation_end]
+    y_val = y[train_end:validation_end]
+    X_test = X[validation_end:]
+    y_train = y[validation_end:]
+
+    return (X_train, y_train), (X_val, y_val), (X_test, y_test)
+
 
 # Create Sequences with all features
 X, y = create_sequences(scaled_features, lookback_window, target_col_idx=3)
