@@ -278,25 +278,72 @@ print(f"Lookback window:{X.shape[1]} days")
 
 print("\n<?  BUILDING LSTM MODEL")
 print("-" * 30)
+def build_model(input_shape, ltsm_units=[64,32], dropout=0.3):
+    model = Sequential()
+    
+    # Layer 1 
+    model.add(LTSM(
+        units=ltsm_units[0],
+        return_sequences=True,
+        input_shape=input_shape,
+        recurrent_dropout=0.1 # Dropout on recurrent connections 
+    ))
 
-# Create Sequential model
-model = Sequential(
-    [
-        # First LSTM layer
-        LSTM(
-            units=50,
-            return_sequences=True,  # Pass sequences to next layer
-            input_shape=(lookback_window, len(feature_columns)),
-        ),
-        # Dropout for regularization to prevent overfitting
-        Dropout(0.2),
-        # Second LSTM layer to learn from first layer
-        LSTM(units=50, return_sequences=False),  # Don't return sequences
-        Dropout(0.2),
-        # Dense layer for prediction
-        Dense(units=1, activation="linear"),
-    ]
+    model.add(BatchNormalization()) # To stablize training
+    model.add(Dropout(dropout))
+   
+    # Layer 2
+    model.add(LTSM(
+        units=ltsm_units[1],
+        return_sequences=False,
+        recurrent_dropout=0.1 
+    ))
+    model.add(BatchNormalization())
+    model.add(Dropout(dropout_rate))
+
+
+    # Dense layers for final prediction 
+    model.add(Dense(units=16, activation='relu'))
+    model.add(Dropout(0.2))
+    model.add(Dense(units=1, activation='linear'))
+
+    return model
+
+
+model = build_model(
+    input_shape=lookback_window, len(feature_columns), 
+    lstm_units=[64,32],
+    dropout=0.3
 )
+
+def setup_training_callbacks(model_save_path='best_model.h5'):
+    callbacks = [
+        # Stop training id validation loss stps improving 
+        EarlyStopping(
+            monitor='val_loss',
+            patience=15,
+            restore_best_weights=True,
+            verbose=1
+        ),
+    
+        ReduceLROnPlateau(
+            monitor='val_loss',
+            factor=0.5,
+            patience=7,
+            min_lr=1e-7,
+            verbose=1
+        )
+
+        ModelCheckpoint(
+            model_save_path,
+            monitor='val_loss',
+            save_best_only=True
+            verbose=1
+        )
+    ]
+        
+    return callbacks
+    
 
 # Compile the model
 model.compile(
