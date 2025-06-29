@@ -33,7 +33,9 @@ engine = create_engine(DATABASE_URL, echo=False)
 SessionLocal = sessionmaker(bind=engine)
 
 end_date = datetime.now().date()
-start_date = end_date - timedelta(365)
+start_date = end_date - timedelta(
+    1095
+)  # 3 years of data for robust training across market cycles
 
 print(f"Querying {ticker} data from {start_date} to {end_date}")
 
@@ -312,10 +314,10 @@ feature_columns = [
 ]
 print(f"Total Features pre cleaning: {len(feature_columns)}")
 
-# Define lookback window before using it
-lookback_window = 180  # Extended for better pattern recognition
 
-# Enhanced Data Cleaning with Robust Preprocessing
+lookback_window = 180
+
+
 print(f"Total data points pre-cleaning: {len(stock_data)}")
 
 # Handle infinite values before dropping NaNs
@@ -342,7 +344,7 @@ print(f"Feature Matrix Shape: {feature_data.shape}")
 
 # Final data quality checks
 if np.isnan(feature_data).any():
-    print("❌ ERROR: NaN values found in feature data after cleaning!")
+    print(" ERROR: NaN values found in feature data after cleaning!")
     nan_cols = [
         feature_columns[i]
         for i in range(len(feature_columns))
@@ -352,7 +354,7 @@ if np.isnan(feature_data).any():
     raise ValueError("Data quality check failed - NaN values present")
 
 if np.isinf(feature_data).any():
-    print("❌ ERROR: Infinite values found in feature data after cleaning!")
+    print(" ERROR: Infinite values found in feature data after cleaning!")
     inf_cols = [
         feature_columns[i]
         for i in range(len(feature_columns))
@@ -361,7 +363,7 @@ if np.isinf(feature_data).any():
     print(f"Columns with infinite values: {inf_cols}")
     raise ValueError("Data quality check failed - Infinite values present")
 
-print("✅ Data quality checks passed!")
+print(" Data quality checks passed!")
 
 
 # Normalize
@@ -595,7 +597,7 @@ def evaluate_model(y_true, y_pred, prices_true, prices_pred):
     directional_accuracy = np.mean(y_true_direction == y_pred_direction) * 100
 
     # Sharpe Ratio
-    np.diff(prices_true.flatten()) / prices_true[:-1].flatten()
+    actual_returns = np.diff(prices_true.flatten()) / prices_true[:-1].flatten()
     predicted_returns = np.diff(prices_pred.flatten()) / prices_true[:-1].flatten()
     if np.std(predicted_returns) > 0:
         sharpe_ratio = (
