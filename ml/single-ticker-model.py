@@ -1,7 +1,4 @@
-import os
 import sys
-import time
-from datetime import datetime, timedelta
 
 import numpy as np
 import pandas as pd
@@ -10,7 +7,8 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error
 from sklearn.preprocessing import MinMaxScaler
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from tensorflow.keras.layers import LSTM, Dense, Dropout
+from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
+from tensorflow.keras.layers import LSTM, BatchNormalization, Dense, Dropout
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.optimizers import Adam
 
@@ -65,8 +63,7 @@ try:
 
     missing_data = stock_data.isnull().sum()
     if missing_data.any():
-        print(f"Missing data found: ")
-        print(missing_data[missing_data > 0])
+        print(f"Missing data found: {missing_data[missing_data > 0]}")
     else:
         print("No missing data found")
 
@@ -213,7 +210,6 @@ if np.isinf(feature_data).any():
 # Normalize
 scaler = MinMaxScaler(feature_range=(0, 1))
 scaled_features = scaler.fit_transform(feature_data)
-print(f"\nScaled feature ranges:")
 print(f"  All features: {scaled_features.min():.3f} to {scaled_features.max():.3f}")
 
 # Create separate scaler for close price only (for inverse transformation)
@@ -221,8 +217,8 @@ close_scaler = MinMaxScaler(feature_range=(0, 1))
 close_prices_scaled = close_scaler.fit_transform(stock_data[["close"]].values)
 
 print("Scalers created:")
-print(f"  Main scaler: handles {len(feature_columns)} features")
-print(f"  Close scaler: handles close price only")
+print(f"Main scaler: handles {len(feature_columns)} features")
+print("Close scaler: handles close price only")
 
 print(
     f"Original price range: {stock_data['close'].min():.2f} - {stock_data['close'].max():.2f}"
@@ -262,7 +258,7 @@ def create_time_series_split(X, y, train_ratio=0.7, validation_ratio=0.15):
     X_val = X[train_end:validation_end]
     y_val = y[train_end:validation_end]
     X_test = X[validation_end:]
-    y_train = y[validation_end:]
+    y_test = y[validation_end:]
 
     return (X_train, y_train), (X_val, y_val), (X_test, y_test)
 
@@ -276,118 +272,128 @@ print(f"Y shape: {y.shape}")  # (samples,)
 print(f"Features per timestep: {X.shape[2]}")
 print(f"Lookback window:{X.shape[1]} days")
 
+# Create time series split
+(X_train, y_train), (X_val, y_val), (X_test, y_test) = create_time_series_split(X, y)
+
+print(f"Training samples: {len(X_train)}")
+print(f"Validation samples: {len(X_val)}")
+print(f"Testing samples: {len(X_test)}")
+
 print("\n<?  BUILDING LSTM MODEL")
 print("-" * 30)
-def build_model(input_shape, ltsm_units=[64,32], dropout=0.3):
+
+
+def build_model(input_shape, lstm_units=[64, 32], dropout=0.3):
     model = Sequential()
-    
-    # Layer 1 
-    model.add(LTSM(
-        units=ltsm_units[0],
-        return_sequences=True,
-        input_shape=input_shape,
-        recurrent_dropout=0.1 # Dropout on recurrent connections 
-    ))
 
-    model.add(BatchNormalization()) # To stablize training
+    # Layer 1
+    model.add(
+        LSTM(
+            units=lstm_units[0],
+            return_sequences=True,
+            input_shape=input_shape,
+            recurrent_dropout=0.1,  # Dropout on recurrent connections
+        )
+    )
+
+    model.add(BatchNormalization())  # To stablize training
     model.add(Dropout(dropout))
-   
+
     # Layer 2
-    model.add(LTSM(
-        units=ltsm_units[1],
-        return_sequences=False,
-        recurrent_dropout=0.1 
-    ))
+    model.add(LSTM(units=lstm_units[1], return_sequences=False, recurrent_dropout=0.1))
     model.add(BatchNormalization())
-    model.add(Dropout(dropout_rate))
+    model.add(Dropout(dropout))
 
-
-    # Dense layers for final prediction 
-    model.add(Dense(units=16, activation='relu'))
+    # Dense layers for final prediction
+    model.add(Dense(units=16, activation="relu"))
     model.add(Dropout(0.2))
-    model.add(Dense(units=1, activation='linear'))
+    model.add(Dense(units=1, activation="linear"))
 
     return model
 
 
 model = build_model(
-    input_shape=lookback_window, len(feature_columns), 
-    lstm_units=[64,32],
-    dropout=0.3
+    input_shape=(lookback_window, len(feature_columns)),
+    lstm_units=[64, 32],
+    dropout=0.3,
 )
 
-def setup_training_callbacks(model_save_path='best_model.h5'):
-    callbacks = [
-        # Stop training id validation loss stps improving 
-        EarlyStopping(
-            monitor='val_loss',
-            patience=15,
-            restore_best_weights=True,
-            verbose=1
-        ),
-    
-        ReduceLROnPlateau(
-            monitor='val_loss',
-            factor=0.5,
-            patience=7,
-            min_lr=1e-7,
-            verbose=1
-        )
 
+def setup_training_callbacks(model_save_path="best_model.h5"):
+    callbacks = [
+        # Stop training if validation loss stops improving
+        EarlyStopping(
+            monitor="val_loss", patience=15, restore_best_weights=True, verbose=1
+        ),
+        ReduceLROnPlateau(
+            monitor="val_loss", factor=0.5, patience=7, min_lr=1e-7, verbose=1
+        ),
         ModelCheckpoint(
-            model_save_path,
-            monitor='val_loss',
-            save_best_only=True
-            verbose=1
-        )
+            model_save_path, monitor="val_loss", save_best_only=True, verbose=1
+        ),
     ]
-        
+
     return callbacks
-    
+
 
 # Compile the model
 model.compile(
-    optimizer=Adam(learning_rate=0.001),  # Adaptive learning rate
-    loss="mean_squared_error",
-    metrics=["mean_absolute_error"],  # Track prediction accuracy
+    optimizer=Adam(learning_rate=0.001, beta_1=0.9, beta_2=0.999),
+    loss="huber",
+    metrics=["mae", "mse"],
 )
-
-# Display model architecture
-print("Model Architecture:")
-model.summary()
-
-
-print("\n=? TRAINING MODEL (QUICK TEST)")
-print("-" * 30)
-
-# Spliit data 80/20
-split_idx = int(len(X) * 0.8)
-X_train, X_test = X[:split_idx], X[split_idx:]
-y_train, y_test = y[:split_idx], y[split_idx:]
-
-print(f"Training samples: {len(X_train)}")
-print(f"Testing samples: {len(X_test)}")
-
-# Train the model
-print("Starting training...")
-start_time = time.time()
+callbacks = setup_training_callbacks()
 
 history = model.fit(
     X_train,
     y_train,
-    epochs=5,
+    validation_data=(X_val, y_val),
+    epochs=100,
     batch_size=32,
-    validation_split=0.2,
-    verbose=1,  # Show training progress
-    shuffle=False,
+    callbacks=callbacks,
+    verbose=1,
+    shuffle=False,  # Need to add so time series data is trained on
 )
 
-training_time = time.time() - start_time
-print(f"Training completed in {training_time:.2f} seconds")
 
+def evaluate_model(y_true, y_pred, prices_true, prices_pred):
+    mse = mean_squared_error(prices_true, prices_pred)
+    mae = mean_absolute_error(prices_true, prices_pred)
+    rmse = np.sqrt(mse)
 
-print("\n=? EVALUATING MODEL PERFORMANCE")
-print("-" * 30)
+    # Financial specific metrics
+    y_true_direction = np.diff(prices_true.flatten()) > 0
+    y_pred_direction = np.diff(prices_pred.flatten()) > 0
+    directional_accuracy = np.mean(y_true_direction == y_pred_direction) * 100
+
+    # Sharpe Ratio
+    actual_returns = np.diff(prices_true.flatten()) / prices_true[:-1].flatten()
+    predicted_returns = np.diff(prices_pred.flatten()) / prices_true[:-1].flatten()
+    if np.std(predicted_returns) > 0:
+        sharpe_ratio = (
+            np.mean(predicted_returns) / np.std(predicted_returns) * np.sqrt(252)
+        )
+    else:
+        sharpe_ratio = 0
+
+    # Maximum drawdown
+    cumulative_returns = np.cumprod(1 + predicted_returns)
+    running_max = np.maximum.accumulate(cumulative_returns)
+    drawdown = (cumulative_returns - running_max) / running_max
+    max_drawdown = np.min(drawdown) * 100
+
+    results = {
+        "mse": mse,
+        "mae": mae,
+        "rmse": rmse,
+        "directional_accuracy": directional_accuracy,
+        "sharpe_ratio": sharpe_ratio,
+        "max_drawdown": max_drawdown,
+        "avg_percentage_error": (mae / np.mean(prices_true)) * 100,
+    }
+
+    return results
+
 
 # Make predictions on test data
 y_pred = model.predict(X_test)
@@ -396,25 +402,11 @@ y_pred = model.predict(X_test)
 y_test_original = close_scaler.inverse_transform(y_test.reshape(-1, 1))
 y_pred_original = close_scaler.inverse_transform(y_pred)
 
-# Calculate error metrics
-mse = mean_squared_error(y_test_original, y_pred_original)
-mae = mean_absolute_error(y_test_original, y_pred_original)
-rmse = np.sqrt(mse)
-
-print(f"Test Results:")
-print(f"  Mean Squared Error: ${mse:.2f}")
-print(f"  Mean Absolute Error: ${mae:.2f}")
-print(f"  Root Mean Squared Error: ${rmse:.2f}")
-
-percentage_error = (mae / y_test_original.mean()) * 100
-print(f"  Average Percentage Error: {percentage_error:.2f}%")
+results = evaluate_model(y_test, y_pred, y_test_original, y_pred_original)
 
 
-# Check env success
-success_checks = [
-    ("TensorFlow imported", True),
-    ("Model created successfully", model is not None),
-    ("Training completed", training_time > 0),
-    ("Predictions generated", len(y_pred) > 0),
-    ("Reasonable accuracy", percentage_error < 50),
-]
+print("Enhanced Model Evaluation:")
+print(f"  RMSE: ${results['rmse']:.2f}")
+print(f"  Directional Accuracy: {results['directional_accuracy']:.1f}%")
+print(f"  Sharpe Ratio: {results['sharpe_ratio']:.3f}")
+print(f"  Max Drawdown: {results['max_drawdown']:.1f}%")

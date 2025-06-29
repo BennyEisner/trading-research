@@ -1,0 +1,14 @@
+[tool.black]
+line-length = 88
+target-version = ["py38"]
+
+[tool.isort]
+profile = "black"
+line_length = 88
+skip = ["venv", "build", "dist"]
+
+[tool.ruff]
+line-length = 88
+select = ["E", "F", "W", "C", "N", "I"]
+ignore = ["E203"]      
+fix = true                     

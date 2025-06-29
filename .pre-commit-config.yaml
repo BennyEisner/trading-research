@@ -1,17 +1,14 @@
 repos:
   - repo: https://github.com/psf/black
-    rev: 23.9.1
+    rev: 23.7.0
     hooks:
       - id: black
-  - repo: https://github.com/PyCQA/isort
-    rev: 5.13.0
+  - repo: https://github.com/pycqa/isort
+    rev: 5.12.0
     hooks:
       - id: isort
-  - repo: https://github.com/PyCQA/flake8
-    rev: 7.1.0
+  - repo: https://github.com/charliermarsh/ruff-pre-commit
+    rev: v0.0.274
     hooks:
-      - id: flake8
-        # ensure Flake8 uses your .flake8 file
-        args: [--config=.flake8]
-        # also skip .venv at the hook level
-        exclude: '^\.venv/|^venv/'
+      - id: ruff
+        args: [--fix]
