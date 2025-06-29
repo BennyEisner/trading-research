@@ -566,7 +566,6 @@ model.compile(
 )
 callbacks = setup_enhanced_training_callbacks()
 
-print("Starting enhanced model training for overnight session...")
 print(
     f"Model architecture: {len(feature_columns)} features, {lookback_window} day lookback"
 )
