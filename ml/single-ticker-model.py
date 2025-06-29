@@ -315,7 +315,7 @@ feature_columns = [
 print(f"Total Features pre cleaning: {len(feature_columns)}")
 
 
-lookback_window = 180
+lookback_window = 120
 
 
 print(f"Total data points pre-cleaning: {len(stock_data)}")
@@ -578,8 +578,8 @@ history = model.fit(
     X_train,
     y_train,
     validation_data=(X_val, y_val),
-    epochs=200,
-    batch_size=16,
+    epochs=50,
+    batch_size=64,
     callbacks=callbacks,
     verbose=1,
     shuffle=False,
@@ -596,7 +596,7 @@ def evaluate_model(y_true, y_pred, prices_true, prices_pred):
     y_pred_direction = np.diff(prices_pred.flatten()) > 0
     directional_accuracy = np.mean(y_true_direction == y_pred_direction) * 100
 
-    # Sharpe Ratio
+    # Sharpe Ratio calculation
     actual_returns = np.diff(prices_true.flatten()) / prices_true[:-1].flatten()
     predicted_returns = np.diff(prices_pred.flatten()) / prices_true[:-1].flatten()
     if np.std(predicted_returns) > 0:
@@ -620,6 +620,8 @@ def evaluate_model(y_true, y_pred, prices_true, prices_pred):
         "sharpe_ratio": sharpe_ratio,
         "max_drawdown": max_drawdown,
         "avg_percentage_error": (mae / np.mean(prices_true)) * 100,
+        "actual_returns_mean": np.mean(actual_returns) * 100,
+        "predicted_returns_mean": np.mean(predicted_returns) * 100,
     }
 
     return results
