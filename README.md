@@ -25,7 +25,7 @@ Later phases will integrate simple portfolio optimization, signal generation, an
 
 ---
 
-## Architecture Approaches
+## Potential Future Architecture Approaches
 
 ### Option A: Unified Multi-Ticker LSTM
 
