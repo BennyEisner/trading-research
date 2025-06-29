@@ -14,7 +14,7 @@ from tensorflow.keras.optimizers import Adam
 
 sys.path.append("/Users/beneisner/financial-returns-api")
 
-from api.models import Base, PriceData, get_session
+from api.models import PriceData
 
 np.random.seed(42)
 tf.random.set_seed(42)
@@ -367,7 +367,7 @@ def evaluate_model(y_true, y_pred, prices_true, prices_pred):
     directional_accuracy = np.mean(y_true_direction == y_pred_direction) * 100
 
     # Sharpe Ratio
-    actual_returns = np.diff(prices_true.flatten()) / prices_true[:-1].flatten()
+    np.diff(prices_true.flatten()) / prices_true[:-1].flatten()
     predicted_returns = np.diff(prices_pred.flatten()) / prices_true[:-1].flatten()
     if np.std(predicted_returns) > 0:
         sharpe_ratio = (
