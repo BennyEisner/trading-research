@@ -50,7 +50,7 @@ class ModelBuilder:
 
         # Branch 2: Forward GRU
         # Applies a Gated Reccurent Unit in only one direction to prevent lookahead bias
-        gru_branch = GRU(128, return_sequence=True)(inputs)
+        gru_branch = GRU(128, return_sequences=True)(inputs)
         gru_branch = BatchNormalization()(gru_branch)
         gru_branch = Dropout(0.3)(gru_branch)
 
@@ -60,7 +60,7 @@ class ModelBuilder:
         conv_branch = Conv1D(64, kernel_size=3, activation="relu")(inputs)
         conv_branch = Conv1D(32, kernel_size=3, activation="relu")(conv_branch)
         conv_branch = GlobalMaxPooling1D()(conv_branch)  # Takes max value across all time steps/feature
-        conv_branch = Reshape((-1, -1))(conv_branch)  # Changes tensor dimensions without changing data
+        conv_branch = Reshape((1, -1))(conv_branch)  # Changes tensor dimensions without changing data
         conv_branch = Lambda(lambda x: tf.tile(x, [1, input_shape[0], 1]))(conv_branch)
 
         # Combine Branches
