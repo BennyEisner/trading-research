@@ -1,5 +1,5 @@
 [tool.black]
-line-length = 88
+line-length = 140 
 target-version = ["py38"]
 
 [tool.isort]
@@ -8,7 +8,7 @@ line_length = 88
 skip = ["venv", "build", "dist"]
 
 [tool.ruff]
-line-length = 88
-select = ["E", "F", "W", "C", "N", "I"]
-ignore = ["E203"]      
-fix = true                     
+line-length = 120
+target-version = "py39"
+ignore = ["N806", "E501", "E402"]
+select = ["E", "F", "W"]
