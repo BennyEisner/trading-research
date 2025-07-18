@@ -18,10 +18,39 @@ __pycache__/
 .vscode/
 .idea/
 
+# Database files
+returns.db
+*.db
+
+# Model files
+*.h5
+*.weights.h5
+enhanced_model.h5
+best_model.weights.h5
+diagnostic_model.h5
+improved_model.h5
+
+# Training logs and results
+*.log
+training_log.json
+overnight_training_log.json
+overnight_progress.log
+model_results_*.json
+run_overnight.sh
+
+# Analysis and documentation (temporary)
+ml/COMPREHENSIVE_ML_ANALYSIS.md
+ml/in\ depth\ analysis.txt
+ml/refactoring.txt
+ml/production-model.py
+
+# Development scripts
+add_*.py
+
+# Alembic (if you want to ignore it)
 alembic/
 
-returns.db
-enhanced_model.h5
+# Configuration files
 alembic.ini
 .pre-commit-config.yaml
 .flake8
