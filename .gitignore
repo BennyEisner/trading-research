@@ -17,3 +17,12 @@ __pycache__/
 # IDE/editor folders
 .vscode/
 .idea/
+
+alembic/
+
+returns.db
+enhanced_model.h5
+alembic.ini
+.pre-commit-config.yaml
+.flake8
+.DS_Store
