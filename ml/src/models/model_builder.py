@@ -6,8 +6,6 @@ Neural network model builder and training utilities
 import time
 
 import tensorflow as tf
-
-# Modern Keras 3.0 imports (2024 best practices)
 from keras import regularizers
 from keras.callbacks import (
     Callback,
@@ -45,7 +43,7 @@ class ModelBuilder:
         """Build advanced multi-branch LSTM model with attention"""
         inputs = Input(shape=input_shape)
 
-        # Branch 1: Deep LSTM (fixed typo: "Depp" -> "Deep")
+        # Branch 1: Deep LSTM
         lstm_branch = LSTM(128, return_sequences=True)(inputs)
         lstm_branch = BatchNormalization()(lstm_branch)
         lstm_branch = Dropout(0.3)(lstm_branch)
@@ -81,7 +79,7 @@ class ModelBuilder:
         attention = LayerNormalization()(attention)
         attention = Dropout(0.2)(attention)
 
-        # Final Processing (fixed typo: "Proccessing" -> "Processing")
+        # Final Processing
         final_lstm = LSTM(32, return_sequences=False)(attention)
         final_lstm = BatchNormalization()(final_lstm)
         final_lstm = Dropout(0.2)(final_lstm)
