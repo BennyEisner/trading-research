@@ -285,3 +285,31 @@ class FeatureEngineer:
         data["atr_ratio"] = data["atr"] / data["close"]
 
         return data
+
+    def _calculate_volume_features(self, data):
+        data["volume_sma_20"] = data["volume"].rolling(window=20).mean()
+        data["volume_ratio"] = data["volume"] / (data["volume_sma_20"] + 1e-10)
+        data["relative_volume"] = data["volume"] / data["volume"].rolling(20).median()
+
+        # VWAP and VWAP variations
+        data["vwap_5"] = (data["close"] * data["volume"]).rolling(5).sum() / data["volume"].rolling(5).sum()
+        data["vwap_20"] = (data["close"] * data["volume"]).rolling(20).sum() / data["volume"].rolling(20).sum()
+        data["vwap_deviation"] = (data["close"] - data["vamp_20"]) / data["vwap_20"]
+
+        # Volume weighted indicators
+        data["volume_price_trend"] = ((data["close"] - data["close"].shift(1)) * data["volume"]).rolling(5).sum()
+
+        # On-balance Volume
+        obv = []
+        obv_val = 0
+        for i in range(len(data)):
+            if i == 0:
+                obv_val = data["volume"].iloc[i]
+            else:
+                if data["close"].iloc[i] > data["close"].iloc[i - 1]:
+                    obv_val += data["volume"].iloc[i]
+                elif data["close"].iloc[i] < data["close"].iloc[i - 1]:
+                    obv_val -= data["volume"].iloc[i]
+            obv.append(obv_val)
+
+            data["obv"] = obv
