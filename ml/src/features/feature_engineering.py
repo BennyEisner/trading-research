@@ -149,6 +149,7 @@ class FeatureEngineer:
 
     def _validate_and_clean_data(self, data):
         # Check for required colums
+        required_cols = ["open", "high", "low", "close", "volume"]
         missing_cols = [col for col in required_cols if col not in data.columns]
         if missing_cols:
             raise ValueError("Missing required columns: {missing_cols}")
@@ -221,5 +222,66 @@ class FeatureEngineer:
         data["ma_convergence"] = abs(data["sma_5"] - data["sma_20"]) / data["close"]
         data["ma_slope_5"] = data["sma_5"].diff(5) / data["sma_5"].shift(5)
         data["ma_slope_20"] = data["sma_20"].diff(5) / data["sma_20"].shift(5)
+
+        return data
+
+    def _calculate_hull_ma(self, series, period):
+        """Calculate Hull Moving Average"""
+        half_period = int(period / 2)
+        sqrt_period = int(np.sqrt(period))
+
+        wma_half = series.rolling(window=half_period).apply(lambda x: np.average(x, weights=np.arange(1, half_period + 1)))
+        wma_full = series.rolling(window=period).apply(lambda x: np.average(x, weights=np.arange(1, half_period + 1)))
+
+        raw_hma = 2 * wma_half - wma_full
+
+        hull_ma = raw_hma.rolling(window=sqrt_period).apply(lambda x: np.average(x, weights=np.arange(1, half_period + 1)))
+
+        return hull_ma
+
+    def _calculate_technical_indicators(self, data):
+        # Multi-period RSI
+        for period in [14, 21]:
+            delta = data["close"].diff()
+            gain = (delta.where(delta > 0.0)).rolling(window=period).mean()
+            loss = (-delta.where(delta < 0.0)).rolling(window=period).mean()
+            rs = gain / (loss + 1e-10)
+            data[f"rsi_{period}"] = 100 - (100 / (1 + rs))
+
+        data["rsi"] = data["rsi_14"]
+
+        # MACD
+        macd_line = data["ema_12"] - data["ema_26"]
+        signal_line = macd_line.ewm(span=9).mean()
+        data["macd_line"] = macd_line
+        data["macd_signal"] = signal_line
+        data["macd_histogram"] = macd_line - signal_line
+
+        # Stochastic Oscillator
+        lowest_low = data["low"].rolling(window=14).min()
+        highest_high = data["high"].rolling(window=14).max()
+        data["stoch_k"] = 100 * (data["close"] - lowest_low) / (highest_high - lowest_low + 1e-10)
+        data["stoch_k"] = data["stoch_k"].rolling(window=3).mean()
+
+        # Commodity Channel Index
+        typical_price = (data["high"] + data["low"] + data["close"]) / 3
+        sma_tp = typical_price.rolling(window=20).mean()
+        mad = typical_price.rolling(window=20).apply(lambda x: np.mean(np.abs(x - x.mean())))
+        data["cci"] = (typical_price - sma_tp) / (0.015 * mad)
+
+        # Bollinger Bands
+        bb_middle = data["close"].rolling(window=20).mean()
+        bb_std = data["close"].rolling(window=20).std()
+        data["bb_upper"] = bb_middle + (bb_std * 2)
+        data["bb_lower"] = bb_middle - (bb_std * 2)
+
+        bb_range = data["bb_upper"] - data["bb_lower"]
+        data["bb_position"] = np.where(bb_range != 0, (data["close"] - data["bb_lower"]) / bb_range, 0.5)
+        data["bb_width"] = bb_range / data["close"]
+        data["bb_squeeze"] = (data["bb_width"] < data["bb_width"].rolling(20).quantile(0.1)).astype(int)
+
+        # Average TR
+        data["atr"] = data["true_range"].rolling(window=14).mean()
+        data["atr_ratio"] = data["atr"] / data["close"]
 
         return data
