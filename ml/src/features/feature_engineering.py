@@ -8,7 +8,10 @@ Feature engineering for financial time series data
 import warnings
 
 import numpy as np
+import pandas as pd
 from scipy import stats
+from scipy.optimize import minimize
+from scipy.stats import norm
 
 warnings.filterwarnings("ignore")
 
@@ -313,3 +316,170 @@ class FeatureEngineer:
             obv.append(obv_val)
 
             data["obv"] = obv
+            data["obv_normalized"] = data["obv"] / data["obv"].rolling(20).mean()
+
+        # Money Flow Index
+        typical_price = (data["high"] + data["low"] + data["close"]) / 3
+        money_flow = typical_price * data["volume"]
+
+        positive_flow = money_flow.where(typical_price > typical_price.shift(1), 0).rolling(14).sum()
+        negative_flow = money_flow.where(typical_price < typical_price.shift(1), 0).rolling(14).sum()
+
+        money_flow_ratio = positive_flow / (negative_flow + 1e-10)
+        data["money_flow_index"] = 100 - (100 / (1 + money_flow_ratio))
+        
+        return data
+
+    def _calculate_volatility_features(self, data):
+        """Calculate comprehensive volatility features including GARCH"""
+        # Calculate log returns for volatility analysis
+        returns = np.log(data["close"] / data["close"].shift(1)).dropna()
+
+        # GARCH conditional volatility
+        data["garch_volatility"] = self._calculate_GARCH_volatility(returns, data.index)
+
+        # Additional volatility metrics
+        data = self._calculate_supporting_volatility_features(data, returns)
+
+        # Williams %R momentum oscillator
+        data["williams_r"] = self._calculate_williams_r(data)
+
+        return data
+
+    def _calculate_supporting_volatility_features(self, data, returns):
+        """Calculate additional volatility metrics complementing GARCH"""
+        
+        # Volatility ratio (short-term vs long-term)
+        vol_5d = returns.rolling(5).std() * np.sqrt(252)  # Annualized
+        vol_20d = returns.rolling(20).std() * np.sqrt(252)
+        volatility_ratio = vol_5d / (vol_20d + 1e-8)
+        data["volatility_ratio"] = volatility_ratio.reindex(data.index)
+
+        # Simple 5-day rolling volatility
+        data["return_volatility_5d"] = (returns.rolling(5).std() * np.sqrt(252)).reindex(data.index)
+
+        # Volatility clustering indicator
+        squared_returns = returns**2
+        clustering_measure = squared_returns.rolling(10).corr(squared_returns.shift(1))
+        data["volatility_clustering"] = clustering_measure.reindex(data.index)
+
+        # Volatility distribution skewness
+        vol_rolling = returns.rolling(20).std()
+        vol_skew = vol_rolling.rolling(60).skew()
+        data["volatility_skew"] = vol_skew.reindex(data.index)
+
+        return data
+
+    def _calculate_williams_r(self, data, period=14):
+        """Calculate Williams %R momentum oscillator"""
+        highest_high = data["high"].rolling(period).max()
+        lowest_low = data["low"].rolling(period).min()
+        
+        # Williams %R formula: -100 * (HH - Close) / (HH - LL)
+        williams_r = -100 * (highest_high - data["close"]) / (highest_high - lowest_low + 1e-10)
+        
+        return williams_r
+
+    def _calculate_GARCH_volatility(self, returns, full_index, p=1, q=1, window=100, min_periods=30):
+        """
+        Calculate GARCH(p,q) conditional volatility using rolling window estimation
+        
+        GARCH(1,1) Model: σ²ₜ = ω + α·ε²ₜ₋₁ + β·σ²ₜ₋₁
+        
+        Args:
+            returns: pandas Series of log returns
+            full_index: full DataFrame index for alignment
+            p: autoregressive lags for variance (default 1)
+            q: moving average lags for variance (default 1) 
+            window: rolling window for parameter estimation (default 100)
+            min_periods: minimum required observations (default 30)
+            
+        Returns:
+            pandas Series of conditional volatilities aligned with full_index
+        """
+
+        volatility = np.full(len(full_index), np.nan)
+
+        returns_array = returns.values
+        n_obs = len(returns_array)
+
+        if n_obs < min_periods:
+            return pd.Series(volatility, index=full_index)
+
+        def estimate_garch_params(ret_window):
+            """Estimate GARCH parameters using Maximum Likelihood Estimation"""
+
+            def garch_likelihood(params):
+                omega, alpha, beta = params
+
+                # Parameter constraints for model stationarity
+                if omega <= 0 or alpha < 0 or beta < 0 or alpha + beta >= 1:
+                    return 1e6  # Large penalty for invalid parameters
+                n = len(ret_window)
+
+                # Initialize conditional variance with sample variance
+                sigma2 = np.full(n, np.var(ret_window))
+                sigma2[0] = np.var(ret_window[:min(10, n)])
+
+                # GARCH recursion: σ²ₜ = ω + α·ε²ₜ₋₁ + β·σ²ₜ₋₁
+                for t in range(1, n):
+                    sigma2[t] = omega + alpha * ret_window[t-1]**2 + beta * sigma2[t-1]
+                    sigma2[t] = max(sigma2[t], 1e-8)  # Numerical stability
+
+                # Calculate negative log-likelihood
+                log_likelihood = -0.5 * np.sum(np.log(2 * np.pi * sigma2) + ret_window**2 / sigma2)
+
+                return -log_likelihood
+
+            initial_guess = [np.var(ret_window) * 0.1, 0.1, 0.8]
+
+            bounds = [(1e-8, None), (0, 1), (0, 1)]
+
+            try:
+                # Optimize params
+                result = minimize(garch_likelihood, initial_guess, bounds=bounds, method="L-BFGS-B")
+
+                if result.success and result.x[1] + result.x[2] < 0.999:
+                    return result.x
+                else:
+                    # Fallback to simple estimates
+                    return [np.var(ret_window) * 0.05, 0.05, 0.90]
+            except:
+                # Emergency fallback
+                return [np.var(ret_window) * 0.05, 0.05, 0.90]
+        
+        # Rolling Window GARCH Calculation
+        start_idx = min_periods
+        
+        for i in range(start_idx, n_obs):
+            # Window boundaries
+            window_start = max(0, i - window + 1)
+            window_end = i + 1
+            
+            ret_window = returns_array[window_start:window_end]
+            
+            if i == start_idx or i % max(1, window // 4) == 0:
+                omega, alpha, beta = estimate_garch_params(ret_window)
+            
+            # GARCH Volatility Calculation
+            window_length = len(ret_window)
+            sigma2_window = np.zeros(window_length)
+            
+            # Initial variance estimate
+            sigma2_window[0] = np.var(ret_window[:min(10, window_length)])
+            
+            # Apply GARCH recursion for entire window
+            for t in range(1, window_length):
+                sigma2_window[t] = omega + alpha * ret_window[t-1]**2 + beta * sigma2_window[t-1]
+                
+                # Numerical stability
+                sigma2_window[t] = max(sigma2_window[t], 1e-8)
+            
+            current_vol = np.sqrt(sigma2_window[-1])
+            
+            # Map back to original index position
+            original_idx = returns.index[i]
+            full_idx_position = full_index.get_loc(original_idx)
+            volatility[full_idx_position] = current_vol
+        
+        return pd.Series(volatility, index=full_index)
