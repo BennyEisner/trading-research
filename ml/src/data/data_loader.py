@@ -14,10 +14,9 @@ from sklearn.preprocessing import MinMaxScaler
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
-from api.models import PriceData
-
 # Add API path for PriceData model
-sys.path.append("/Users/beneisner/financial-returns-api")
+sys.path.append(os.path.join(os.path.dirname(__file__), "../../../"))
+from api.models import PriceData, ReturnData
 
 
 # Separates Database loading, Handles Database errors and validation,
@@ -34,13 +33,23 @@ class DataLoader:
 
     def _setup_database(self):
         """Setup database connection"""
-        db_path = "./returns.db"
+        # Extract database path from URL
+        if self.database_url.startswith("sqlite:///"):
+            db_path = self.database_url.replace("sqlite:///", "")
+            
+            # Handle relative paths - look in parent directory
+            if not os.path.isabs(db_path):
+                # Look for database in parent directory (main API directory)
+                parent_db_path = os.path.join(os.path.dirname(__file__), "../../../", db_path)
+                if os.path.exists(parent_db_path):
+                    db_path = parent_db_path
+                    self.database_url = f"sqlite:///{os.path.abspath(db_path)}"
 
-        if not os.path.exists(db_path):
-            raise FileNotFoundError(f"Database file not found: {db_path}")
+            if not os.path.exists(db_path):
+                raise FileNotFoundError(f"Database file not found: {db_path}")
 
-        if not os.access(db_path, os.R_OK):
-            raise PermissionError(f"Cannot read database file: {db_path}")
+            if not os.access(db_path, os.R_OK):
+                raise PermissionError(f"Cannot read database file: {db_path}")
 
         try:
             self.engine = create_engine(self.database_url, echo=False)
@@ -58,8 +67,12 @@ class DataLoader:
 
         session = self.session_maker()
         try:
-            ticker_records = (
-                session.query(PriceData)
+            # Join PriceData with ReturnData to get both price and return data
+            records = (
+                session.query(PriceData, ReturnData.daily_return)
+                .outerjoin(ReturnData, 
+                          (PriceData.ticker_symbol == ReturnData.ticker_symbol) & 
+                          (PriceData.date == ReturnData.date))
                 .filter(PriceData.ticker_symbol == ticker)
                 .filter(PriceData.date >= start_date)
                 .filter(PriceData.date <= end_date)
@@ -67,21 +80,22 @@ class DataLoader:
                 .all()
             )
 
-            if not ticker_records:
+            if not records:
                 raise ValueError(f"No {ticker} data available for date range {start_date} to {end_date}")
 
             # Convert to DataFrame
             stock_data = pd.DataFrame(
                 [
                     {
-                        "date": record.date,
-                        "open": record.open,
-                        "high": record.high,
-                        "low": record.low,
-                        "close": record.close,
-                        "volume": record.volume,
+                        "date": record[0].date,  # PriceData.date
+                        "open": record[0].open,
+                        "high": record[0].high,
+                        "low": record[0].low,
+                        "close": record[0].close,
+                        "volume": record[0].volume,
+                        "daily_return": record[1] if record[1] is not None else 0.0,  # ReturnData.daily_return
                     }
-                    for record in ticker_records
+                    for record in records
                 ]
             )
 
@@ -122,13 +136,14 @@ class DataLoader:
         X, y = [], []
         max_idx = len(features) - 1
 
+        # FIXED: Use i+1 to predict next day's return (prevent data leakage)
         for i in range(lookback_window, max_idx):
             X.append(features[i - lookback_window : i, :])
-            y.append(targets[i])
+            y.append(targets[i + 1])  # Predict next period's return
 
         return np.array(X), np.array(y)
 
-    def load_multi_ticker_data(self, tickers, years, feature_engineer):
+    def load_multi_ticker_data(self, tickers, years, feature_engineer=None):
         """Load and process data from multiple tickers"""
         all_sequences = []
         all_targets = []
@@ -146,19 +161,23 @@ class DataLoader:
                     print(f"Converted to {len(ticker_data)} weekly records for {ticker}")
 
                 # Feature engineering
+                if feature_engineer is None:
+                    from ..features.factory import create_feature_engineer
+                    feature_engineer = create_feature_engineer(self.config)
+                
                 ticker_data = feature_engineer.calculate_all_features(ticker_data)
                 feature_columns = feature_engineer.select_stable_features(ticker_data)
                 ticker_features = ticker_data[feature_columns].ffill().bfill()
 
-                # Scale features
-                scaler = MinMaxScaler()
+                # Scale features - FIXED: Use StandardScaler to preserve negative/positive relationships
+                scaler = StandardScaler()
                 ticker_features_scaled = scaler.fit_transform(ticker_features)
 
-                # Compute targets
+                # Compute targets - FIXED: Use forward/backward fill instead of fillna(0)
                 if self.config.get("prediction_horizon") == "weekly":
-                    target_values = ticker_data["close"].pct_change(periods=1).shift(-1).fillna(0).values
+                    target_values = ticker_data["close"].pct_change(periods=1).fillna(method='ffill').fillna(method='bfill').values
                 else:
-                    target_values = ticker_data["daily_return"].shift(-1).fillna(0).values
+                    target_values = ticker_data["daily_return"].fillna(method='ffill').fillna(method='bfill').values
 
                 # Create sequences
                 X_ticker, y_ticker = self.create_sequences(
