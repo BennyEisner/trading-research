@@ -1,0 +1,47 @@
+# Development Configuration
+# Pragmatic settings for local development and testing
+
+environment: "development"
+log_level: "DEBUG"
+
+database:
+  url: "postgresql://trader:password@localhost:5432/trading_research_dev"
+  echo: true
+  pool_size: 3
+  max_overflow: 5
+
+model:
+  # Small dataset for fast iteration
+  tickers: ["AAPL", "MSFT", "GOOG"]
+  lookback_window: 30
+  prediction_horizons: [1, 3, 5]  # Fewer horizons for development
+  target_features: 20
+  
+  model_params:
+    lstm_units_1: 256  # Smaller model for development
+    lstm_units_2: 128
+    lstm_units_3: 64
+    dropout_rate: 0.3
+    directional_alpha: 0.4
+    use_attention: true
+    dense_layers: [128, 64, 32]
+  
+  training_params:
+    batch_size: 32
+    epochs: 20  # Fewer epochs for quick testing
+    learning_rate: 0.001
+    patience: 5
+    validation_split: 0.2
+
+backtest:
+  transaction_cost: 0.001
+  training_window_days: 126  # 6 months for development
+  rebalance_frequency_days: 5
+  walk_forward_window_days: 15  # Shorter windows
+
+api:
+  host: "127.0.0.1"
+  port: 8000
+  reload: true
+  log_level: "DEBUG"
+  model_cache_size: 2

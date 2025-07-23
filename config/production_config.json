@@ -1,0 +1,32 @@
+{
+  "pipeline": {
+    "stages": {
+      "data_preparation": true,
+      "hyperparameter_tuning": true,
+      "model_training": true,
+      "model_evaluation": true,
+      "model_artifacts": true
+    },
+    "hyperparameter_tuning": {
+      "method": "random_search",
+      "n_trials": 15,
+      "epochs_per_trial": 10,
+      "enable_grid_search": false
+    }
+  },
+  "model": {
+    "tickers": ["AAPL", "MSFT", "GOOG", "NVDA", "TSLA", "AMZN", "META"],
+    "years_of_data": 20,
+    "database_url": "sqlite:////Users/beneisner/financial-returns-api/returns.db",
+    "lookback_window": 30,
+    "target_features": 40,
+    "features_per_category": 6,
+    "random_seed": 42
+  },
+  "training": {
+    "max_epochs": 100,
+    "patience": 15,
+    "validation_split": 0.2,
+    "test_split": 0.2
+  }
+}
