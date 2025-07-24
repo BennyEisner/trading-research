@@ -6,16 +6,17 @@ Simple API for trading research model serving
 """
 
 import logging
-from datetime import datetime
-from typing import Dict, Any
-
-from fastapi import FastAPI, HTTPException, Depends
-from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
+from datetime import datetime
+from typing import Any, Dict
+
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 
 from config.config import get_config
 from database.connection import get_database_manager
-from .routes import predictions, portfolio, health
+
+from .routes import health, portfolio, predictions
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +110,7 @@ def create_app() -> FastAPI:
         }
     
     return app
+
 
 
 # Dependency injection

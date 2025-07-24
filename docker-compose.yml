@@ -1,8 +1,6 @@
 # Docker Compose for Personal Trading Research
 # Simple single-machine deployment
-
 version: '3.8'
-
 services:
   # PostgreSQL with TimescaleDB
   database:
@@ -24,7 +22,13 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    ports:
+      - "5050:80"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: bennyeisner1@gmail.com
+      PGADMIN_DEFAULT_PASSWORD: password
   # Trading Research API
   api:
     build: .
@@ -38,9 +42,9 @@ services:
       - DATABASE_URL=postgresql://trader:password@database:5432/trading_research
       - ENVIRONMENT=development
     volumes:
-      - ./models:/app/models:ro  # Read-only model files
-      - ./config:/app/config:ro  # Read-only config files
-      - ./logs:/app/logs         # Writable logs
+      - ./models:/app/models:ro # Read-only model files
+      - ./config:/app/config:ro # Read-only config files
+      - ./logs:/app/logs # Writable logs
       - ./ml-requirements.txt:/app/requirements.txt:ro
     restart: unless-stopped
     healthcheck:
@@ -48,7 +52,6 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-
   # Optional: Simple monitoring with Grafana
   grafana:
     image: grafana/grafana:latest
@@ -61,14 +64,13 @@ services:
       - grafana_data:/var/lib/grafana
       - ./monitoring/grafana:/etc/grafana/provisioning
     restart: unless-stopped
-    profiles: ["monitoring"]  # Optional service
-
+    profiles: ["monitoring"] # Optional service
 volumes:
   postgres_data:
     driver: local
   grafana_data:
     driver: local
-
 networks:
   default:
     name: trading_network
+

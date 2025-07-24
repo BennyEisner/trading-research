@@ -15,7 +15,8 @@ from pathlib import Path
 if sys.version_info < (3, 12):
     raise RuntimeError("This application requires Python 3.12 or higher")
 
-from pydantic import BaseSettings, Field
+from pydantic import Field
+from pydantic_settings import BaseSettings
 
 
 class DatabaseConfig(BaseSettings):

@@ -1,5 +1,5 @@
 # Core dependencies for trading research infrastructure
-# Python 3.12 compatible versions (latest stable)
+# Python 3.12 compatible versions (latest packages)
 
 # Web framework
 fastapi>=0.115.0
@@ -10,11 +10,11 @@ sqlalchemy>=2.0.36
 psycopg2-binary>=2.9.10
 alembic>=1.14.0
 
-# Machine Learning (Python 3.12 compatible)
-tensorflow>=2.18.0
-scikit-learn>=1.6.0
-pandas>=2.2.3
-numpy>=1.26.4
+# Machine Learning (Python 3.13 compatible)
+tensorflow>=2.19.0
+scikit-learn>=1.5.0
+pandas>=2.2.0
+numpy>=1.26.0,<2.0.0
 
 # Configuration and validation
 pydantic>=2.10.0
@@ -23,7 +23,7 @@ pyyaml>=6.0.2
 
 # Financial data
 yfinance>=0.2.48
-ta-lib>=0.4.32
+# ta-lib>=0.4.32  # May need manual install on Python 3.13
 
 # Utilities
 python-dateutil>=2.9.0
