@@ -7,11 +7,10 @@ FastAPI Health Check
 import time
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 
-from ..app import get_db_manager, get_model_manager
+from database.connection import get_database_manager
 
 router = APIRouter()  # Creates router instance
 
@@ -22,7 +21,7 @@ async def health_check():
 
 
 @router.get("/db")  # /health/db
-async def database_health(db_manager=Depends(get_db_manager)):
+async def database_health(db_manager=Depends(get_database_manager)):
     """Checks to ensure database is functional and operating correctly"""
 
     try:

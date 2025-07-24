@@ -21,10 +21,13 @@ from pydantic_settings import BaseSettings
 
 class DatabaseConfig(BaseSettings):
     """Database configuration"""
-    url: str = Field(default="postgresql://trader:password@localhost:5432/trading_research")
+    url: str = Field(default="postgresql://trader:password@localhost:5432/trading_research", alias="DATABASE_URL")
     pool_size: int = Field(default=5)
     max_overflow: int = Field(default=10)
     echo: bool = Field(default=False)
+    
+    class Config:
+        env_prefix = ""
 
 
 class ModelConfig(BaseSettings):
