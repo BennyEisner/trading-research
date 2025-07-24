@@ -1,57 +1,132 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 
 # Virtual environments
 .venv/
 venv/
+env/
 
-# Python caches
-__pycache__/
-*.py[cod]
-
-# Jupyter notebook checkpoints
-.ipynb_checkpoints/
-
-# Local environment files
-.env
-.virtual_documents/
-
-# IDE/editor folders
-.vscode/
+# editor
 .idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Environment variables
+.env
+.env.local
+.env.production
+.env.test
 
 # Database files
-returns.db
 *.db
+*.sqlite3
+returns.db
 
-# Model files
+# Model files and training outputs
 *.h5
 *.weights.h5
-enhanced_model.h5
-best_model.weights.h5
-diagnostic_model.h5
-improved_model.h5
+*.pkl
+*.joblib
+models/trained/*.h5
+models/checkpoints/*.h5
 
-# Training logs and results
+# Logs and temporary files
 *.log
+logs/
 training_log.json
 overnight_training_log.json
 overnight_progress.log
 model_results_*.json
-run_overnight.sh
 
-# Analysis and documentation (temporary)
-ml/COMPREHENSIVE_ML_ANALYSIS.md
-ml/in\ depth\ analysis.txt
-ml/refactoring.txt
-ml/production-model.py
+# Data files (large datasets)
+data/
+*.csv
+*.parquet
 
-# Development scripts
-add_*.py
+# Docker
+.dockerignore
 
-# Alembic (if you want to ignore it)
-alembic/
+# Node.js (for frontend)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.yarn/
 
-# Configuration files
-alembic.ini
-.pre-commit-config.yaml
-.flake8
+# Testing
+.coverage
+.pytest_cache/
+.tox/
+htmlcov/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+#Documentation builds
+docs/_build/
+docs/memory-bank
+
+# Mac
 .DS_Store
+.AppleDouble
+.LSOverride
+
+# Thumbnails
+._*
+
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# Local configuration overrides
+config/local.yaml
+config/secrets.yaml
+
+# Backup files
+*.bak
+*.backup
+*.orig
+
+# Temporary development files
+scratch/
+temp/
+tmp/

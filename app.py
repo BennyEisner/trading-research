@@ -1,4 +1,9 @@
+import sys
 from datetime import date
+
+# Verify Python version
+if sys.version_info < (3, 12):
+    raise RuntimeError("This application requires Python 3.12 or higher")
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware

@@ -21,13 +21,13 @@ DEFAULT_CONFIG = {
     "learning_rate": 0.002,
     "early_stopping_patience": 80,
     "years_of_data": 15,
-    "prediction_horizon": "weekly",
+    "prediction_horizon": "daily",
     "enable_cross_validation": False,
     "enable_ensemble": True,  # Multiple model ensemble
     "enable_advanced_features": True,  # Complex feature engineering
     "enable_attention": True,  # Attention mechanism
     "log_file": "overnight_training_log.json",
-    "database_url": "sqlite:///./returns.db",
+    "database_url": "sqlite:////Users/beneisner/financial-returns-api/returns.db",
     "train_ratio": 0.7,
     "validation_ratio": 0.15,
     "cv_folds": 3,

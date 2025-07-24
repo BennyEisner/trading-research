@@ -3,12 +3,19 @@
 """
 Pragmatic Configuration Management
 Type-safe configuration using Pydantic for personal trading research
+Requires Python 3.12+
 """
 
-from pydantic import BaseSettings, Field
+import sys
 from typing import List, Dict, Any, Optional
 import yaml
 from pathlib import Path
+
+# Verify Python version
+if sys.version_info < (3, 12):
+    raise RuntimeError("This application requires Python 3.12 or higher")
+
+from pydantic import BaseSettings, Field
 
 
 class DatabaseConfig(BaseSettings):

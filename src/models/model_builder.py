@@ -2,19 +2,24 @@
 
 """
 Neural network model builder and training utilities
+Requires Python 3.12+ and TensorFlow 2.18+
 """
+import sys
 import time
 
+if sys.version_info < (3, 12):
+    raise RuntimeError("This module requires Python 3.12 or higher")
+
 import tensorflow as tf
-from keras import regularizers
-from keras.callbacks import (
+from tensorflow.keras import regularizers
+from tensorflow.keras.callbacks import (
     Callback,
     EarlyStopping,
     LearningRateScheduler,
     ModelCheckpoint,
     ReduceLROnPlateau,
 )
-from keras.layers import (
+from tensorflow.keras.layers import (
     GRU,
     LSTM,
     BatchNormalization,
@@ -29,8 +34,8 @@ from keras.layers import (
     MultiHeadAttention,
     Reshape,
 )
-from keras.models import Model
-from keras.optimizers import Adam
+from tensorflow.keras.models import Model
+from tensorflow.keras.optimizers import Adam
 
 
 class ModelBuilder:

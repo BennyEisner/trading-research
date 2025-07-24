@@ -1,0 +1,74 @@
+# Docker Compose for Personal Trading Research
+# Simple single-machine deployment
+
+version: '3.8'
+
+services:
+  # PostgreSQL with TimescaleDB
+  database:
+    image: timescale/timescaledb:latest-pg14
+    container_name: trading_db
+    environment:
+      POSTGRES_DB: trading_research
+      POSTGRES_USER: trader
+      POSTGRES_PASSWORD: password
+      TIMESCALEDB_TELEMETRY: 'off'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trader -d trading_research"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Trading Research API
+  api:
+    build: .
+    container_name: trading_api
+    ports:
+      - "8000:8000"
+    depends_on:
+      database:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql://trader:password@database:5432/trading_research
+      - ENVIRONMENT=development
+    volumes:
+      - ./models:/app/models:ro  # Read-only model files
+      - ./config:/app/config:ro  # Read-only config files
+      - ./logs:/app/logs         # Writable logs
+      - ./ml-requirements.txt:/app/requirements.txt:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Optional: Simple monitoring with Grafana
+  grafana:
+    image: grafana/grafana:latest
+    container_name: trading_grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana:/etc/grafana/provisioning
+    restart: unless-stopped
+    profiles: ["monitoring"]  # Optional service
+
+volumes:
+  postgres_data:
+    driver: local
+  grafana_data:
+    driver: local
+
+networks:
+  default:
+    name: trading_network

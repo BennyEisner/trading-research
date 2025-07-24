@@ -4,12 +4,14 @@
 Cross-validation and model evaluation utilities
 """
 
-import numpy as np
-from sklearn.metrics import mean_absolute_error
+import os
 
 # Add import for financial metrics
 import sys
-import os
+
+import numpy as np
+from sklearn.metrics import mean_absolute_error
+
 sys.path.append(os.path.join(os.path.dirname(__file__), "../"))
 from utils.financial_metrics import FinancialMetrics
 
@@ -158,7 +160,7 @@ class ModelEvaluator:
         financial_metrics = {}
         try:
             financial_metrics = FinancialMetrics.evaluate_trading_performance(y_pred, y_true)
-        except Exception as e:
+        except Exception:
             # If financial metrics calculation fails, continue with basic metrics
             pass
 
@@ -175,10 +177,10 @@ class ModelEvaluator:
             "n_samples": len(y_true),
             "n_correct_direction": n_correct,
         }
-        
+
         # Add financial metrics if available
         results.update(financial_metrics)
-        
+
         return results
 
     @staticmethod

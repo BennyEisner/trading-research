@@ -2,7 +2,12 @@
 
 """
 Directional-focused loss functions for financial time series prediction
+Requires Python 3.12+ and TensorFlow 2.18+
 """
+
+import sys
+if sys.version_info < (3, 12):
+    raise RuntimeError("This module requires Python 3.12 or higher")
 
 import tensorflow as tf
 from tensorflow import keras
@@ -26,7 +31,7 @@ class DirectionalLoss:
             alpha: Weight between MSE (1-alpha) and directional (alpha) components
         """
         # Standard MSE component
-        mse_loss = tf.keras.losses.MeanSquaredError()(y_true, y_pred)
+        mse_loss = tf.keras.losses.mean_squared_error(y_true, y_pred)
         
         # Directional component - penalize wrong directions more heavily
         y_true_sign = tf.sign(y_true)
@@ -220,7 +225,7 @@ class DirectionalModelBuilder:
         ]
         
         # Compile with directional focus
-        optimizer = keras.optimizers.Adam(
+        optimizer = tf.keras.optimizers.Adam(
             learning_rate=params.get('learning_rate', 0.001),
             beta_1=0.9,
             beta_2=0.999,
@@ -241,7 +246,7 @@ class DirectionalModelBuilder:
         """
         callbacks = [
             # Early stopping based on directional accuracy
-            keras.callbacks.EarlyStopping(
+            tf.keras.callbacks.EarlyStopping(
                 monitor='val_directional_accuracy',
                 patience=params.get('patience', 10),
                 restore_best_weights=True,
@@ -250,7 +255,7 @@ class DirectionalModelBuilder:
             ),
             
             # Reduce learning rate when directional accuracy plateaus
-            keras.callbacks.ReduceLROnPlateau(
+            tf.keras.callbacks.ReduceLROnPlateau(
                 monitor='val_directional_accuracy',
                 factor=0.5,
                 patience=5,
@@ -260,7 +265,7 @@ class DirectionalModelBuilder:
             ),
             
             # Model checkpoint based on best directional accuracy
-            keras.callbacks.ModelCheckpoint(
+            tf.keras.callbacks.ModelCheckpoint(
                 filepath='best_directional_model.h5',
                 monitor='val_directional_accuracy',
                 save_best_only=True,
