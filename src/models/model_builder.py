@@ -155,7 +155,7 @@ class ModelBuilder:
         )
         return model
 
-    def get_callbacks(self, model_save_path="best_model.h5", logger=None):
+    def get_callbacks(self, model_save_path="models/trained/best_model.keras", logger=None):
         """Get training callbacks including learning rate scheduler"""
         callbacks = [
             EarlyStopping(

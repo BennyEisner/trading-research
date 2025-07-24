@@ -79,7 +79,7 @@ class DirectionalEnhancedTrainer(LSTMProductionTrainer):
             ),
             # Model checkpoint based on best directional accuracy
             tf.keras.callbacks.ModelCheckpoint(
-                filepath="best_directional_lstm_model.h5",
+                filepath="models/trained/best_directional_lstm_model.keras",
                 monitor=self.directional_config["monitor_metric"],
                 save_best_only=True,
                 mode=self.directional_config["early_stopping_mode"],

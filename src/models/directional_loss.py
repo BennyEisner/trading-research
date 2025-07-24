@@ -266,7 +266,7 @@ class DirectionalModelBuilder:
             
             # Model checkpoint based on best directional accuracy
             tf.keras.callbacks.ModelCheckpoint(
-                filepath='best_directional_model.h5',
+                filepath='models/trained/best_directional_model.keras',
                 monitor='val_directional_accuracy',
                 save_best_only=True,
                 mode='max',

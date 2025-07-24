@@ -72,7 +72,7 @@ def get_directional_training_config():
             'monitor': 'val__directional_accuracy',
             'save_best_only': True,
             'mode': 'max',
-            'filepath': 'best_zero_temporal_loss_model.h5'
+            'filepath': 'models/trained/best_zero_temporal_loss_model.keras'
         }
     }
 

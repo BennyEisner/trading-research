@@ -249,7 +249,7 @@ class ProductionMLPipeline:
             training_results = trainer.train_directional_model(data_splits)
 
             # Save model
-            model_file = self.output_dir / "models" / "best_directional_model.h5"
+            model_file = self.output_dir / "models" / "best_directional_model.keras"
             training_results["model"].save(str(model_file))
 
             # Save training configuration
