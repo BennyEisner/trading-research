@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import keras
 import tensorflow as tf
 
 
@@ -42,17 +43,73 @@ class ModelManager:
             except Exception as e:
                 self.logger.error(f"Error processing {model_file}: {e}")
 
-        self.logger.error(f"Discovered {len(self.models_registry)} models")
+        self.logger.info(f"Discovered {len(self.models_registry)} models")
 
     def get_model(self, name):
         """Get a loaded model by name"""
-        # TODO Implement actual model retrieval
-        return None
+        try:
+            if name in self.models:
+                self.logger.info(f"Returning cached model: {name}")
+                return self.models[name]
 
-    def list_models(self) -> List[str]:
-        """List all available models"""
-        # TODO Implement actual model listing
-        return []
+            if name not in self.models_registry:
+                self.logger.warning(f"Model not found in registry: {name}")
+                return None
+
+            model_info = self.models_registry[name]
+            model_path = model_info["file_path"]
+
+            self.logger.info(f"Loading model from: {model_path}")
+
+            model = tf.keras.models.load_model(model_path)
+
+            self.models[name] = model
+
+            self.logger.info(f"Successfully loaded and cached model: {name}")
+            return model
+
+        except Exception as e:
+            self.logger.error(f"Failed to load model {name}: {e}")
+            return None
+
+    def list_models(self) -> List[Dict[str, Any]]:
+        """List all available models with metadata"""
+        return list(self.models_registry.values())
+    
+    def list_model_names(self) -> List[str]:
+        """List just the model names"""
+        return list(self.models_registry.keys())
+    
+    def get_model_info(self, name: str) -> Optional[Dict[str, Any]]:
+        """Get model metadata without loading the model"""
+        return self.models_registry.get(name)
+    
+    def is_model_loaded(self, name: str) -> bool:
+        """Check if model is currently loaded in cache"""
+        return name in self.models
+    
+    def unload_model(self, name: str) -> bool:
+        """Remove model from cache to free memory"""
+        if name in self.models:
+            del self.models[name]
+            self.logger.info(f"Unloaded model from cache: {name}")
+            return True
+        return False
+    
+    def clear_cache(self):
+        """Clear all loaded models from cache"""
+        count = len(self.models)
+        self.models.clear()
+        self.logger.info(f"Cleared {count} models from cache")
+    
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """Get cache statistics"""
+        return {
+            "total_models_available": len(self.models_registry),
+            "models_loaded_in_cache": len(self.models),
+            "cached_model_names": list(self.models.keys()),
+            "available_model_names": list(self.models_registry.keys())
+        }
 
     def _parse_model_file(self, model_file: Path) -> Optional[Dict]:
         """Extract metadata from .keras files and JSON files"""
@@ -97,7 +154,7 @@ class ModelManager:
                 model_info["training_epochs"] = metadata.get("training_epochs", 0)
                 model_info["final_loss"] = metadata.get("final_loss", 0)
                 model_info["final_val_loss"] = metadata.get("final_val_loss")
-                model_info["cofig"] = metadata.get("config", {})
+                model_info["config"] = metadata.get("config", {})
 
             return model_info
 
