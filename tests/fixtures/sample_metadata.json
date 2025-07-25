@@ -1,0 +1,27 @@
+{
+  "timestamp": "20250724_123456",
+  "config": {
+    "database_url": "sqlite:///./test_returns.db",
+    "tickers": ["TEST", "DEMO"],
+    "years_of_data": 1,
+    "lookback_window": 30,
+    "lstm_units_1": 128,
+    "lstm_units_2": 64,
+    "lstm_units_3": 32,
+    "dropout_rate": 0.2,
+    "l2_regularization": 0.001,
+    "use_attention": true,
+    "dense_layers": [64, 32],
+    "learning_rate": 0.001,
+    "batch_size": 16,
+    "epochs": 5,
+    "directional_alpha": 0.4,
+    "target_features": 10,
+    "prediction_horizon": "daily"
+  },
+  "model_path": "tests/fixtures/mock_models/test_model_20250724_123456.keras",
+  "model_parameters": 50000,
+  "training_epochs": 5,
+  "final_loss": 0.5,
+  "final_val_loss": 0.6
+}
