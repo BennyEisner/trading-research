@@ -53,3 +53,54 @@ class ModelManager:
         """List all available models"""
         # TODO Implement actual model listing
         return []
+
+    def _parse_model_file(self, model_file: Path) -> Optional[Dict]:
+        """Extract metadata from .keras files and JSON files"""
+
+        try:
+            filename = model_file.stem  # Removes .keras
+            parts = filename.split("_")
+
+            if len(parts) < 3:
+                self.logger.warning(
+                    f"Unexpected file name format: {filename}"
+                )  # Since all files in the form .keras.model.___
+                return None
+
+            # Extract components
+            model_type = "_".join(parts[:2])  # Everything except datetine
+            date = parts[-2]
+            time = parts[-1]
+
+            metadata_file = model_file.parent / f"metadata_{date}_{time}.json"
+            metadata = {}
+
+            if metadata_file.exists():
+                with open(metadata_file, "r") as f:
+                    metadata = json.load(f)
+
+            model_info = {
+                "name": filename,
+                "file_path": str(model_file.absolute()),
+                "model_type": model_type,
+                "training_date": date,
+                "training_time": time,
+                "file_size_md": model_file.stat().st_size / (1024 * 1024),  # Readability
+                "created_timestamp": datetime.fromtimestamp(model_file.stat().st_ctime),
+                "modified_timestamp": datetime.fromtimestamp(model_file.stat().st_mtime),
+            }
+
+            if metadata:
+                model_info["metadata"] = metadata
+                model_info["tickers"] = metadata.get("config", {}).get("tickers", [])
+                model_info["parameters"] = metadata.get("model_parameters", 0)
+                model_info["training_epochs"] = metadata.get("training_epochs", 0)
+                model_info["final_loss"] = metadata.get("final_loss", 0)
+                model_info["final_val_loss"] = metadata.get("final_val_loss")
+                model_info["cofig"] = metadata.get("config", {})
+
+            return model_info
+
+        except Exception as e:
+            self.logger.error(f"Error parsing model file: {e}")
+            return None
