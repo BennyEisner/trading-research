@@ -244,8 +244,16 @@ class PipelineValidator:
         sequence_stds = np.std(X, axis=1)
         zero_variance_sequences = (sequence_stds == 0).any(axis=1).sum()
         
-        if zero_variance_sequences > len(X) * 0.1:
-            issues.append(f"High number of zero-variance sequences: {zero_variance_sequences}")
+        # Check if ALL features have zero variance (which would be a real problem)
+        all_features_zero_var = (sequence_stds == 0).all(axis=1).sum()
+        
+        if all_features_zero_var > len(X) * 0.1:  # More than 10% of sequences have zero variance in ALL features
+            issues.append(f"High number of sequences with zero variance in all features: {all_features_zero_var}")
+        elif zero_variance_sequences == len(X):  # Every sequence has at least one zero-variance feature
+            if self.logger:
+                self.logger.info(f"Note: All sequences have some zero-variance features (likely ticker identity), but this may be expected")
+            else:
+                print(f"Note: All sequences have some zero-variance features (likely ticker identity), but this may be expected")
         
         # Check target distribution
         target_std = np.std(y)

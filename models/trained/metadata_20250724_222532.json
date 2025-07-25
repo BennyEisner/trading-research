@@ -1,0 +1,33 @@
+{
+  "timestamp": "20250724_222532",
+  "config": {
+    "database_url": "sqlite:///./returns.db",
+    "tickers": [
+      "AAPL",
+      "MSFT"
+    ],
+    "years_of_data": 2,
+    "lookback_window": 30,
+    "lstm_units_1": 256,
+    "lstm_units_2": 128,
+    "lstm_units_3": 64,
+    "dropout_rate": 0.3,
+    "l2_regularization": 0.003,
+    "use_attention": true,
+    "dense_layers": [
+      128,
+      64
+    ],
+    "learning_rate": 0.001,
+    "batch_size": 32,
+    "epochs": 10,
+    "directional_alpha": 0.4,
+    "target_features": 20,
+    "prediction_horizon": "daily"
+  },
+  "model_path": "models/trained/simple_lstm_20250724_222532.keras",
+  "model_parameters": 919809,
+  "training_epochs": 10,
+  "final_loss": 0.6439011096954346,
+  "final_val_loss": 0.6105459928512573
+}

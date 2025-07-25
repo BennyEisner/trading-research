@@ -226,7 +226,7 @@ class MultiScaleLSTMBuilder:
             alpha = params.get('directional_alpha', 0.4)  # Weight for directional component
             
             # MSE component
-            mse_loss = tf.keras.losses.mean_squared_error(y_true, y_pred)
+            mse_loss = tf.keras.losses.MeanSquaredError()(y_true, y_pred)
             
             # Directional component
             y_true_sign = tf.sign(y_true)

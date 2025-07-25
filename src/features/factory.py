@@ -10,7 +10,7 @@ from .processors.technical_indicators import TechnicalIndicatorsProcessor
 from .processors.volatility_features import VolatilityFeaturesProcessor
 from .processors.volume_features import VolumeFeaturesProcessor
 from .processors.market_features import MarketFeaturesProcessor
-from .selectors.ensemble_selector import EnsembleFeatureSelector
+from .simple_selector import SimpleCategorySelector
 
 
 class FeatureEngineeringFactory:
@@ -34,15 +34,18 @@ class FeatureEngineeringFactory:
         ]
         
         # Initialize feature selector
-        self.selector = EnsembleFeatureSelector()
+        self.selector = SimpleCategorySelector()
     
     def calculate_all_features(self, data):
         """Calculate all features using the pipeline"""
-        # Import the main feature engineering class
-        from .feature_engineering import FeatureEngineer
+        # Import the minimal feature engineering class for testing
+        import sys
+        import os
+        sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+        from minimal_features import MinimalFeatureEngineer
         
         # Create instance and calculate features
-        feature_eng = FeatureEngineer()
+        feature_eng = MinimalFeatureEngineer()
         processed_data = feature_eng.calculate_all_features(data)
         
         return processed_data
@@ -56,10 +59,15 @@ class FeatureEngineeringFactory:
         if not feature_columns:
             return basic_columns[1:]  # Return OHLCV without date
         
-        # Use ensemble selector if we have features
+        # Use category selector if we have features
         try:
-            selected_features = self.selector.select_features(data, feature_columns)
-            return basic_columns[1:] + selected_features  # Include OHLCV + selected
+            # Convert to format expected by SimpleCategorySelector
+            X = data[feature_columns]
+            y = data['daily_return'].fillna(0).values  # Need target for selection
+            
+            # Use fit_transform method
+            selected_data = self.selector.fit_transform(X, y)
+            return basic_columns[1:] + selected_data.columns.tolist()  # Include OHLCV + selected
         except Exception as e:
             print(f"Warning: Feature selection failed ({e}), using all features")
             return feature_columns

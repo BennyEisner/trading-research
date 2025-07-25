@@ -243,12 +243,12 @@ class FeatureEngineer:
         half_period = int(period / 2)
         sqrt_period = int(np.sqrt(period))
 
-        wma_half = series.rolling(window=half_period).apply(lambda x: np.average(x, weights=np.arange(1, half_period + 1)))
-        wma_full = series.rolling(window=period).apply(lambda x: np.average(x, weights=np.arange(1, half_period + 1)))
+        wma_half = series.rolling(window=half_period).apply(lambda x: np.average(x, weights=np.arange(1, len(x) + 1)))
+        wma_full = series.rolling(window=period).apply(lambda x: np.average(x, weights=np.arange(1, len(x) + 1)))
 
         raw_hma = 2 * wma_half - wma_full
 
-        hull_ma = raw_hma.rolling(window=sqrt_period).apply(lambda x: np.average(x, weights=np.arange(1, half_period + 1)))
+        hull_ma = raw_hma.rolling(window=sqrt_period).apply(lambda x: np.average(x, weights=np.arange(1, len(x) + 1)))
 
         return hull_ma
 
@@ -580,8 +580,9 @@ class FeatureEngineer:
         data["spy_correlation"] = data["daily_return"].rolling(20).corr(data["daily_return"].shift(1)).fillna(0.5)
         
         # Market regime indicator (combines volatility and trend)
-        vol_regime = data.get("volatility_regime", 1)
-        trend_regime = data.get("trend_regime", 0)  
+        # Use fillna with scalar values instead of .get() which returns scalars
+        vol_regime = data.get("volatility_regime", pd.Series([1] * len(data), index=data.index))
+        trend_regime = data.get("trend_regime", pd.Series([0] * len(data), index=data.index))
         data["market_regime"] = vol_regime + trend_regime
         
         # Yield curve slope proxy (placeholder - would use real data in production)
