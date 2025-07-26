@@ -61,7 +61,77 @@ class ModelManager:
 
             self.logger.info(f"Loading model from: {model_path}")
 
-            model = tf.keras.models.load_model(model_path)
+            # Enable unsafe deserialization for Lambda layers (needed for custom layers)
+            import keras
+            keras.config.enable_unsafe_deserialization()
+            
+            # Define custom functions for model loading
+            def directional_mse_loss(y_true, y_pred):
+                """Custom directional MSE loss function"""
+                alpha = 0.4  # Default from training
+                mse_loss = tf.keras.losses.MeanSquaredError()(y_true, y_pred)
+                y_true_sign = tf.sign(y_true)
+                y_pred_sign = tf.sign(y_pred)
+                directional_error = 0.5 * (1 - y_true_sign * y_pred_sign)
+                directional_loss = tf.reduce_mean(directional_error)
+                return (1 - alpha) * mse_loss + alpha * directional_loss
+            
+            def _directional_accuracy(y_true, y_pred):
+                """Custom metric: Directional accuracy"""
+                y_true_sign = tf.sign(y_true)
+                y_pred_sign = tf.sign(y_pred)
+                correct_directions = tf.equal(y_true_sign, y_pred_sign)
+                return tf.reduce_mean(tf.cast(correct_directions, tf.float32))
+            
+            def _weighted_directional_accuracy(y_true, y_pred):
+                """Custom metric: Weighted directional accuracy"""
+                y_true_sign = tf.sign(y_true)
+                y_pred_sign = tf.sign(y_pred)
+                correct_directions = tf.cast(tf.equal(y_true_sign, y_pred_sign), tf.float32)
+                weights = tf.abs(y_true)
+                weights = weights / (tf.reduce_mean(weights) + 1e-8)
+                weighted_accuracy = tf.reduce_sum(correct_directions * weights) / tf.reduce_sum(weights)
+                return weighted_accuracy
+            
+            def _correlation_metric(y_true, y_pred):
+                """Custom metric: Pearson correlation coefficient"""
+                x = y_true - tf.reduce_mean(y_true)
+                y = y_pred - tf.reduce_mean(y_pred)
+                numerator = tf.reduce_sum(x * y)
+                denominator = tf.sqrt(tf.reduce_sum(x**2) * tf.reduce_sum(y**2))
+                correlation = numerator / (denominator + 1e-8)
+                return correlation
+            
+            def _up_down_accuracy(y_true, y_pred):
+                """Custom metric: Balanced accuracy for up vs down moves"""
+                y_true_sign = tf.sign(y_true)
+                y_pred_sign = tf.sign(y_pred)
+                
+                # Up moves accuracy
+                up_mask = y_true > 0
+                up_correct = tf.logical_and(up_mask, tf.equal(y_true_sign, y_pred_sign))
+                up_total = tf.reduce_sum(tf.cast(up_mask, tf.float32))
+                up_accuracy = tf.reduce_sum(tf.cast(up_correct, tf.float32)) / (up_total + 1e-8)
+                
+                # Down moves accuracy  
+                down_mask = y_true < 0
+                down_correct = tf.logical_and(down_mask, tf.equal(y_true_sign, y_pred_sign))
+                down_total = tf.reduce_sum(tf.cast(down_mask, tf.float32))
+                down_accuracy = tf.reduce_sum(tf.cast(down_correct, tf.float32)) / (down_total + 1e-8)
+                
+                # Return balanced accuracy
+                return (up_accuracy + down_accuracy) / 2.0
+            
+            # Load model with custom objects
+            custom_objects = {
+                'directional_mse_loss': directional_mse_loss,
+                '_directional_accuracy': _directional_accuracy,
+                '_weighted_directional_accuracy': _weighted_directional_accuracy,
+                '_correlation_metric': _correlation_metric,
+                '_up_down_accuracy': _up_down_accuracy
+            }
+            
+            model = tf.keras.models.load_model(model_path, custom_objects=custom_objects)
 
             self.models[name] = model
 

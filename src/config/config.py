@@ -21,7 +21,7 @@ DEFAULT_CONFIG = {
     "learning_rate": 0.002,
     "early_stopping_patience": 80,
     "years_of_data": 15,
-    "prediction_horizon": "daily",
+    "prediction_horizon": "weekly",
     "enable_cross_validation": False,
     "enable_ensemble": True,  # Multiple model ensemble
     "enable_advanced_features": True,  # Complex feature engineering

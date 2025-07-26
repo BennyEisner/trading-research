@@ -130,3 +130,5 @@ config/secrets.yaml
 scratch/
 temp/
 tmp/
+
+src/validation/tests/.hypothesis

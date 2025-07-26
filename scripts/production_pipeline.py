@@ -10,14 +10,18 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from tensorflow.core.function.trace_type import Serializable
+
+from validation import robust_time_series_validator
+
 # Verify Python version
 if sys.version_info < (3, 12):
     raise RuntimeError("This application requires Python 3.12 or higher")
 
 sys.path.append(".")
 
-from directional_hyperparameter_tuning import run_directional_tuning
-from enhanced_directional_training import DirectionalEnhancedTrainer
+from src.training.directional_trainer import DirectionalEnhancedTrainer
+from src.training.hyperparameter_optimizer import run_directional_tuning
 
 
 class ProductionMLPipeline:
@@ -43,8 +47,15 @@ class ProductionMLPipeline:
                     "data_preparation": True,
                     "hyperparameter_tuning": True,
                     "model_training": True,
+                    "statistical_validation": True,
                     "model_evaluation": True,
                     "model_artifacts": True,
+                },
+                "validation": {
+                    "block_size": 5,
+                    "n_bootstrap": 1000,
+                    "significance_threshold": 0.05,
+                    "require_significance": False,
                 },
                 "hyperparameter_tuning": {
                     "method": "random_search",  # random_search, grid_search, both
@@ -55,10 +66,10 @@ class ProductionMLPipeline:
             },
             "model": {
                 "tickers": ["AAPL", "MSFT", "GOOG", "NVDA", "TSLA", "AMZN", "META"],
-                "years_of_data": 20,
+                "years_of_data": 10,
                 "database_url": "sqlite:////Users/beneisner/financial-returns-api/returns.db",
                 "lookbook_window": 30,
-                "target_features": 40,
+                "target_features": 20,
                 "features_per_category": 6,
                 "random_seed": 42,
             },
@@ -220,6 +231,74 @@ class ProductionMLPipeline:
             }
 
             return default_params
+
+    def stage_2_5_statistical_validation(self, training_results, data_splits):
+        """Statistical validation on model performance"""
+
+        print(f"\n{'='*60}")
+        print(f"STATISTICAL VALIDATION ")
+        print(f"{'='*60}")
+
+        if not self.config["pipeline"]["stages"].get("statistical_validatiob", True):
+            print(" Skipping statistical validation (disabled in config)")
+            return None
+
+        try:
+            from src.validation.robust_time_series_validator import RobustTimeSeriesValidator
+
+            model = training_results["models"]
+            X_train, y_train, X_val, y_val, X_test, y_test, feature_names = data_splits
+
+            # Predicyions on test set
+            tes_predictions = model.predict(X_test, verbose=0).flatten()
+
+            # Initialize validator with parameters
+            validator = robust_time_series_validator.RobustTimeSeriesValidator(block_size=5, n_bootstrap=1000)
+
+            print("Running statisticla validation")
+
+            # Run validation results
+            validation_results = validator.validate_model_significance(
+                returns=y_test, predictions=test_predictions, test_types=["bootstrap", "permutation"]
+            )
+
+            validation_file = self.output_dir / "evaluation" / "statistical_validation.json"
+            with open(validation_file, "w") as f:
+                serializable_results = self._make_json_serializable(validation_results)
+                json.dump(serializable_results, f, indent=2)
+
+            validator.print_validaton_summary()
+
+            # Extract metrics
+            overall_assessment = validaiton_results["overall_assessment"]
+            is_statistically_significant = overall_assessment["all_significant"]
+            min_p_value = overall_assessment["min_p_value"]
+
+            print(f"\nSTATISTICAL VALIDATION SUMMARY:")
+            print(
+                f"Statistically Significant: {'YES' if
+            is_statistically_significant else 'NO'}"
+            )
+            print(f"Minimum P-value: {min_p_value:.4f}")
+            print(f"Recommendation: {overall_assessment['recommendation']}")
+
+            # Store results
+            self.pipeline_results["stage_2_5"] = {
+                "status": "success",
+                "validation_file": str(validation_file),
+                "statistically_significant": is_statistically_significant,
+                "min_p_value": min_p_value,
+                "recommendation": overall_assessment["recommendation"],
+                "bootstrap_p_value": validation_results.get("moving_block_bootstrap", {}).get("p_value"),
+                "permutation_p_value": validation_results.get("conditional_permutation", {}).get("p_value"),
+            }
+
+            return validation_results
+
+        except Exception as e:
+            print(f"Stage 2.5 failed: {e}")
+            self.pipeline_results["stage_2_5"] = {"status": "failed", "error": str(e)}
+            return None
 
     def stage_3_model_training(self, data_splits, best_params):
         """Stage 3: Model Training with Optimal Parameters"""
@@ -418,6 +497,12 @@ class ProductionMLPipeline:
             training_results = self.stage_3_model_training(data_splits, best_params)
             if training_results is None and self.config["pipeline"]["stages"]["model_training"]:
                 raise Exception("Model training failed")
+            
+            # Stage 2.5: Statistical Validation
+            if training_results is not None: 
+                validation_results = self.stage_2_5_statistical_validation(training_results, data_splits)
+                
+                if (self.config["pipeline"]["validation"].get("require_significance", False) and validation_results and not validation_results.get("overall_assesment",{}).get("all_significant", False)): 
 
             # Stage 4: Evaluation (skip if no training results)
             if training_results is not None:
