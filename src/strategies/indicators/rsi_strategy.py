@@ -88,24 +88,26 @@ class RSIMeanReversionStrategy(BaseStrategy):
         overbought_condition = (rsi > self.config.overbought_threshold).fillna(False)
 
         # Long signals (buy oversold)
-        prev_oversold = oversold_condition.shift(1, fill_value=False)
-        long_entries = oversold_condition & ~prev_oversold
+        long_entries = oversold_condition & ~oversold_condition.shift(1).fillna(False)
         signals.loc[long_entries, "position"] = 1.0
         signals.loc[long_entries, "entry_price"] = data.loc[long_entries, "close"]
 
         # Short signals (sell overbought)
-        prev_overbought = overbought_condition.shift(1, fill_value=False)
-        short_entries = overbought_condition & ~prev_overbought
+        short_entries = overbought_condition & ~overbought_condition.shift(1).fillna(False)
         signals.loc[short_entries, "position"] = -1.0
         signals.loc[short_entries, "entry_price"] = data.loc[short_entries, "close"]
 
         # Generate exit signals
         if self.config.exit_on_neutral:
             # Exit longs when RSI reverts back to neutral zone (handle NaN values)
-            long_exits = ((rsi > self.config.neutral_zone_lower) & (rsi.shift(1) <= self.config.neutral_zone_lower)).fillna(False)
+            long_exits = (
+                (rsi > self.config.neutral_zone_lower) & (rsi.shift(1) <= self.config.neutral_zone_lower)
+            ).fillna(False)
 
             # Exit shorts when RSI reverts back to neutral zone (handle NaN values)
-            short_exits = ((rsi < self.config.neutral_zone_upper) & (rsi.shift(1) >= self.config.neutral_zone_upper)).fillna(False)
+            short_exits = (
+                (rsi < self.config.neutral_zone_upper) & (rsi.shift(1) >= self.config.neutral_zone_upper)
+            ).fillna(False)
 
             # Apply exits (SIMPLIFIED VERSION FOR DEVELOPMENT STAGE)
             signals.loc[long_exits, "position"] = 0.0
@@ -148,9 +150,9 @@ class RSIMeanReversionStrategy(BaseStrategy):
             short_strength = (rsi - self.config.overbought_threshold) / (100 - self.config.overbought_threshold)
             strength[short_mask] = short_strength[short_mask].clip(0, 1)
 
-        # Volatility Adjustment 
-        if self.config.volatility_adjustment and "atr" in data.columns: 
-            # Reduce signal strength for increased volatility 
+        # Volatility Adjustment
+        if self.config.volatility_adjustment and "atr" in data.columns:
+            # Reduce signal strength for increased volatility
             atr_normalized = data["atr"] / data["close"]
             rolling_mean = atr_normalized.rolling(20, min_periods=1).mean()
             vol_ratio = (atr_normalized / rolling_mean).clip(0, 2)  # Cap at 2x mean
@@ -159,23 +161,23 @@ class RSIMeanReversionStrategy(BaseStrategy):
 
         return strength.fillna(0)
 
-    def _calculate_rsi_extremity(self, rsi_value: float) -> float: 
+    def _calculate_rsi_extremity(self, rsi_value: float) -> float:
         """Calculate how extreme an RSI value is (0 to 1)"""
 
         if rsi_value <= self.config.oversold_threshold:
             return (self.config.oversold_threshold - rsi_value) / self.config.oversold_threshold
 
-        elif rsi_value >= self.config.overbought_threshold: 
-            return (rsi_value - self.config.overbought_threshold) / (100 - self.config.overbought_threshold) 
+        elif rsi_value >= self.config.overbought_threshold:
+            return (rsi_value - self.config.overbought_threshold) / (100 - self.config.overbought_threshold)
 
-        else: 
-            return 0.0 
+        else:
+            return 0.0
 
-    def get_strategy_description(self) -> str: 
+    def get_strategy_description(self) -> str:
         """Get human-readable strategy description"""
-        return (f"RSI Mean Reversion Strategy: " 
-                f"Long when RSI < {self.config.oversold_threshold}, " 
-                f"Short when RSI > {self.config.overbought_threshold}, "
-                f"Exit in neutral zone [{self.config.neutral_zone_lower}-{self.config.neutral_zone_upper}]")
-
-
+        return (
+            f"RSI Mean Reversion Strategy: "
+            f"Long when RSI < {self.config.oversold_threshold}, "
+            f"Short when RSI > {self.config.overbought_threshold}, "
+            f"Exit in neutral zone [{self.config.neutral_zone_lower}-{self.config.neutral_zone_upper}]"
+        )
