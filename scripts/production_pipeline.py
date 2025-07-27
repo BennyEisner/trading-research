@@ -10,10 +10,6 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from tensorflow.core.function.trace_type import Serializable
-
-from validation import robust_time_series_validator
-
 # Verify Python version
 if sys.version_info < (3, 12):
     raise RuntimeError("This application requires Python 3.12 or higher")
@@ -239,25 +235,31 @@ class ProductionMLPipeline:
         print(f"STATISTICAL VALIDATION ")
         print(f"{'='*60}")
 
-        if not self.config["pipeline"]["stages"].get("statistical_validatiob", True):
+        if not self.config["pipeline"]["stages"].get("statistical_validation", True):
             print(" Skipping statistical validation (disabled in config)")
             return None
 
         try:
             from src.validation.robust_time_series_validator import RobustTimeSeriesValidator
 
-            model = training_results["models"]
+            model = training_results["model"]
             X_train, y_train, X_val, y_val, X_test, y_test, feature_names = data_splits
 
-            # Predicyions on test set
-            tes_predictions = model.predict(X_test, verbose=0).flatten()
+            # Predictions on test set
+            test_predictions = model.predict(X_test, verbose=0).flatten()
 
             # Initialize validator with parameters
-            validator = robust_time_series_validator.RobustTimeSeriesValidator(block_size=5, n_bootstrap=1000)
+            validator = RobustTimeSeriesValidator(
+                block_size=self.config["pipeline"]["validation"]["block_size"],
+                n_bootstrap=self.config["pipeline"]["validation"]["n_bootstrap"],
+                random_state=42,
+            )
 
-            print("Running statisticla validation")
+            print("Running comprehensive statistical validation...")
+            print("- Moving block bootstrap test (preserves temporal dependencies)")
+            print("- Conditional permutation test (controls for market regimes)")
 
-            # Run validation results
+            # Run validation tests
             validation_results = validator.validate_model_significance(
                 returns=y_test, predictions=test_predictions, test_types=["bootstrap", "permutation"]
             )
@@ -267,20 +269,18 @@ class ProductionMLPipeline:
                 serializable_results = self._make_json_serializable(validation_results)
                 json.dump(serializable_results, f, indent=2)
 
-            validator.print_validaton_summary()
+            # Print validation summary
+            validator.print_validation_summary()
 
-            # Extract metrics
-            overall_assessment = validaiton_results["overall_assessment"]
+            # Extract key metrics
+            overall_assessment = validation_results["overall_assessment"]
             is_statistically_significant = overall_assessment["all_significant"]
             min_p_value = overall_assessment["min_p_value"]
 
-            print(f"\nSTATISTICAL VALIDATION SUMMARY:")
-            print(
-                f"Statistically Significant: {'YES' if
-            is_statistically_significant else 'NO'}"
-            )
-            print(f"Minimum P-value: {min_p_value:.4f}")
-            print(f"Recommendation: {overall_assessment['recommendation']}")
+            print(f"\n🎯 STATISTICAL VALIDATION SUMMARY:")
+            print(f"   Statistically Significant: {'✅ YES' if is_statistically_significant else '❌ NO'}")
+            print(f"   Minimum P-value: {min_p_value:.4f}")
+            print(f"   Recommendation: {overall_assessment['recommendation']}")
 
             # Store results
             self.pipeline_results["stage_2_5"] = {
@@ -497,12 +497,18 @@ class ProductionMLPipeline:
             training_results = self.stage_3_model_training(data_splits, best_params)
             if training_results is None and self.config["pipeline"]["stages"]["model_training"]:
                 raise Exception("Model training failed")
-            
+
             # Stage 2.5: Statistical Validation
-            if training_results is not None: 
+            if training_results is not None:
                 validation_results = self.stage_2_5_statistical_validation(training_results, data_splits)
-                
-                if (self.config["pipeline"]["validation"].get("require_significance", False) and validation_results and not validation_results.get("overall_assesment",{}).get("all_significant", False)): 
+
+                # Optional: Fail pipeline if not statistically significant
+                if (
+                    self.config["pipeline"]["validation"].get("require_significance", False)
+                    and validation_results
+                    and not validation_results.get("overall_assessment", {}).get("all_significant", False)
+                ):
+                    raise Exception("Model failed statistical significance tests")
 
             # Stage 4: Evaluation (skip if no training results)
             if training_results is not None:
@@ -557,14 +563,62 @@ class ProductionMLPipeline:
             "use_attention": True,
         }
 
+    def _make_json_serializable(self, obj):
+        """Convert numpy arrays and other non-serializable objects to JSON-compatible format"""
+        import numpy as np
+
+        if isinstance(obj, dict):
+            return {k: self._make_json_serializable(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._make_json_serializable(item) for item in obj]
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, (np.integer, np.floating)):
+            return obj.item()
+        elif isinstance(obj, np.bool_):
+            return bool(obj)
+        else:
+            return obj
+
     def _create_deployment_readme(self):
-        """Create deployment documentation"""
+        """Create documentation with validation results"""
+
+        validation_status = "NOT TESTED"
+        validation_details = ""
+
+        if "stage_2_5" in self.pipeline_results:
+            stage_2_5 = self.pipeline_results["stage_2_5"]
+            if stage_2_5.get("status") == "success":
+                is_significant = stage_2_5.get("statistically_significant", False)
+                validation_status = "STATISTICALLY SIGNIFICANT" if is_significant else "NOT SIGNIFICANT"
+                validation_details = f"""## Statistical Validation Results
+
+- **Overall Significance**: {'PASS' if is_significant else 'FAIL'}
+- **Minimum P-value**: {stage_2_5.get('min_p_value', 'N/A')}
+- **Bootstrap P-value**: {stage_2_5.get('bootstrap_p_value', 'N/A')}
+- **Permutation P-value**: {stage_2_5.get('permutation_p_value', 'N/A')}
+- **Recommendation**: {stage_2_5.get('recommendation', 'N/A')}
+
+### What This Means:
+- **Statistically Significant**: Model predictions beat random chance with statistical confidence
+- **Bootstrap Test**: Validates performance while preserving temporal dependencies  
+- **Permutation Test**: Validates performance while controlling for market regime effects
+- **P-value < 0.05**: Required for statistical significance at 95% confidence
+"""
         return f"""# Production Model Deployment Guide
 
 ## Pipeline Run Information
 - **Timestamp**: {self.timestamp}
 - **Configuration**: {self.config_file}
 - **Output Directory**: {self.output_dir}
+
+## Model Validation Status
+**Statistical Validation**: {validation_status}
+
+{validation_details}
+
+## Next Steps for Deployment
+{'**APPROVED**: This model has passed statistical validation and can proceed to production.' if validation_status.startswith('STATISTICALLY SIGNIFICANT') else '**NOT APPROVED**: This model has NOT passed statistical validation. Do not deploy to production.'}
 
 Generated by Production ML Pipeline - {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 """

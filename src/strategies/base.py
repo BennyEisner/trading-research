@@ -9,10 +9,10 @@ from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
 import pandas as pd
 import numpy as np
-from pydantic import BaseSettings, Field
+from pydantic import BaseModel, Field
 
 
-class StrategyConfig(BaseSettings):
+class StrategyConfig(BaseModel):
     """Base configuration for all strategies"""
     
     name: str
@@ -27,9 +27,6 @@ class StrategyConfig(BaseSettings):
     # Signal filtering
     min_signal_strength: float = Field(default=0.0, ge=0.0, le=1.0)
     lookback_period: int = Field(default=20, ge=1)
-    
-    class Config:
-        env_prefix = ""
 
 
 @dataclass
