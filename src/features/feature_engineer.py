@@ -51,15 +51,16 @@ class FeatureEngineer:
         }
         
         # Processing order (respects dependencies)
+        # NOTE: Temporarily disabled 'market', 'macro', 'cross_sectional' due to NaN issues
         self.processing_order = [
             'price',      # Basic price features first
             'technical',  # Technical indicators (need EMAs from price)
             'volume',     # Volume features
             'momentum',   # Momentum features
             'volatility', # Volatility features (need daily_return)
-            'market',     # Market context features
-            'macro',      # Macro-economic features
-            'cross_sectional'  # Cross-sectional features (needs other tickers)
+            # 'market',     # Market context features - DISABLED (creates all NaNs)
+            # 'macro',      # Macro-economic features - DISABLED (creates all NaNs)
+            # 'cross_sectional'  # Cross-sectional features - DISABLED (creates all NaNs)
         ]
         
         # Results storage

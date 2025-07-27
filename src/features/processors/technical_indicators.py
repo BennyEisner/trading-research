@@ -18,7 +18,7 @@ class TechnicalIndicatorsProcessor(BaseFeatureProcessor):
         super().__init__("technical_indicators")
         self.feature_names = [
             "rsi_14", "rsi_21", "rsi",
-            "macd_line", "macd_signal", "macd_histogram", 
+            "macd", "macd_signal", "macd_histogram", 
             "stoch_k", "cci", "bb_upper", "bb_lower", "bb_position", 
             "bb_width", "bb_squeeze", "atr", "atr_ratio", "williams_r"
         ]
@@ -80,7 +80,7 @@ class TechnicalIndicatorsProcessor(BaseFeatureProcessor):
         macd_line = data["ema_12"] - data["ema_26"]
         signal_line = macd_line.ewm(span=9).mean()
         
-        data["macd_line"] = macd_line
+        data["macd"] = macd_line
         data["macd_signal"] = signal_line
         data["macd_histogram"] = macd_line - signal_line
         
