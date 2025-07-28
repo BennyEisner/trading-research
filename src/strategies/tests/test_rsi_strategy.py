@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from ..indicators.rsi_strategy import RSIMeanReversionStrategy, RSIStrategyConfig
+from ..implementations.rsi_strategy import RSIMeanReversionStrategy, RSIStrategyConfig
 
 
 class TestRSIStrategyConfig:
