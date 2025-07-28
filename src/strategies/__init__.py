@@ -7,9 +7,9 @@ Ensemble-based technical indicator strategies for financial time series
 
 from .base import BaseStrategy, StrategyConfig
 from .ensemble import EnsembleManager, EnsembleConfig
-from .indicators import (
+from .implementations import (
     RSIMeanReversionStrategy,
-    # MACDMomentumStrategy, 
+    MACDMomentumStrategy, 
     # BollingerBreakoutStrategy,
     # VolumePriceTrendStrategy,
     # VolatilityBreakoutStrategy
@@ -21,7 +21,7 @@ __all__ = [
     'EnsembleManager',
     'EnsembleConfig',
     'RSIMeanReversionStrategy',
-    # 'MACDMomentumStrategy',
+    'MACDMomentumStrategy',
     # 'BollingerBreakoutStrategy',
     # 'VolumePriceTrendStrategy',
     # 'VolatilityBreakoutStrategy'

@@ -49,12 +49,7 @@ env/
 returns.db
 
 # Model files and training outputs
-*.h5
-*.weights.h5
-*.pkl
-*.joblib
-models/trained/*.h5
-models/checkpoints/*.h5
+/models
 
 # Logs and temporary files
 *.log
