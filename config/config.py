@@ -35,29 +35,71 @@ class ModelConfig(BaseSettings):
     # Core parameters
     tickers: List[str] = Field(default=["AAPL", "MSFT", "GOOG", "NVDA", "TSLA", "AMZN", "META"])
     lookback_window: int = Field(default=30)
-    prediction_horizons: List[int] = Field(default=[1, 3, 5, 10])  # Multi-timeframe
+    prediction_horizon: int = Field(default=1)  # Primary prediction horizon in days (1=daily, 3=3-day, 4=4-day)
+    # Note: Single horizon approach for efficiency. Use prediction_horizon=3 for 3-day returns, etc.
     target_features: int = Field(default=24)
     random_seed: int = Field(default=42)
     
-    # Model architecture
-    model_params: Dict[str, Any] = Field(default={
-        'lstm_units_1': 512,
-        'lstm_units_2': 256,
-        'lstm_units_3': 128,
-        'dropout_rate': 0.3,
-        'l2_regularization': 0.003,
-        'directional_alpha': 0.4,
-        'use_attention': True,
-        'dense_layers': [256, 128, 64]
-    })
+    # Model architecture configurations by size
+    model_size: str = Field(default="medium")  # Options: "small", "medium", "large"
+    
+    # Model architecture - dynamically set based on model_size
+    model_params: Dict[str, Any] = Field(default_factory=lambda: {})
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.model_params = self._get_model_params_for_size(self.model_size)
+    
+    def _get_model_params_for_size(self, size: str) -> Dict[str, Any]:
+        """Get model parameters optimized for specific parameter count targets"""
+        
+        base_params = {
+            'dropout_rate': 0.3,
+            'l2_regularization': 0.003,
+            'directional_alpha': 0.05,
+        }
+        
+        if size == "small":  # Target: ~500K-800K parameters
+            return {
+                **base_params,
+                'lstm_units_1': 224,      # Increased to hit target range
+                'lstm_units_2': 160,      # Increased to hit target range
+                'lstm_units_3': 96,       # Keep current
+                'use_attention': False,   # Remove attention (major param reduction)
+                'dense_layers': [224, 128], # Larger dense layers for target range
+                'model_type': 'simplified_lstm'  # Use simpler architecture
+            }
+        elif size == "medium":  # Target: ~1M-1.5M parameters  
+            return {
+                **base_params,
+                'lstm_units_1': 320,      # Increased to hit target range
+                'lstm_units_2': 192,      # Increased to hit target range
+                'lstm_units_3': 96,       # Increased to hit target range
+                'use_attention': True,    # Keep attention but optimized
+                'dense_layers': [192, 96], # Larger dense layers for target range
+                'attention_heads': 4,     # Fewer attention heads
+                'model_type': 'efficient_multi_scale'
+            }
+        else:  # "large" - Original architecture
+            return {
+                **base_params,
+                'lstm_units_1': 512,
+                'lstm_units_2': 256,
+                'lstm_units_3': 128,
+                'use_attention': True,
+                'dense_layers': [256, 128, 64],
+                'model_type': 'full_multi_scale'
+            }
     
     # Training parameters
     training_params: Dict[str, Any] = Field(default={
         'batch_size': 64,
         'epochs': 100,
         'learning_rate': 0.0005,
-        'patience': 15,
-        'validation_split': 0.2
+        'patience': 5,  # Fixed: reduced from 15 for faster convergence
+        'validation_split': 0.2,
+        'monitor_metric': 'val__directional_accuracy',  # Fixed: correct TensorFlow metric name (double underscore)
+        'early_stopping_mode': 'max'
     })
 
 

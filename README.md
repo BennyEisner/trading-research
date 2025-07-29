@@ -1,19 +1,20 @@
-# ML Alpha Generation System
+# Trading Research
 
 ## Project Focus
 
 **Goal**: Generate consistent alpha through improved ML models and risk management  
-**Target**: 52-55% directional accuracy with Sharpe ratio >1.0  
+**Target**: 52-55% win rate with Sharpe ratio >1.0  
 **Approach**: Cross-sectional ranking, multi-timeframe ensembles, and regime awareness
 
 ## Architecture
 
 ```
 ML Alpha Generation System
-├── PostgreSQL                  # Single database for all data
+├── PostgreSQL + TimescaleDB    # Time-series optimized data storage
 ├── FastAPI                     # Model serving API
 ├── Multi-Strategy Models       # Cross-sectional, multi-timeframe, regime-aware
-├── Walk-Forward Backtesting    # performance validation
+├── Ensemble Strategy Framework # Refactored pipeline orchestration
+├── Walk-Forward Backtesting    # Performance validation
 ├── Risk Management             # Position sizing
 └── Docker Deployment           # Containerized setup
 ```
@@ -28,11 +29,20 @@ ML Alpha Generation System
 │   ├── docker-compose.yml # Single machine deployment
 │   └── Dockerfile         # Python API container
 │
+├── Pipeline Orchestration
+│   ├── pipeline/          # Refactored pipeline components
+│   │   ├── orchestration/     # Thin pipeline orchestration (EnsembleDataPipeline)
+│   │   ├── coordination/      # Ensemble coordination with graceful degradation
+│   │   ├── historical/        # Historical data integration
+│   │   └── backtesting/       # Enhanced backtesting framework
+│
 ├── Business Logic
-│   ├── strategies/        # Trading strategy implementations
-│   │   ├── cross_sectional/    # Sector-neutral ranking models
-│   │   ├── multi_timeframe/    # 1,3,5,10-day ensemble
-│   │   └── regime_aware/       # Market condition adaptation
+│   ├── strategies/        # strategy implementations
+│   │   ├── core/             # Strategy compatibility checker
+│   │   ├── implementations/   # RSI, MACD and other strategy implementations
+│   │   ├── adapters/         # ENsure coordination and quality checks
+│   │   ├── validation/       # Strategy-specific validation
+│   │   └── ensemble.py       # Ensemble manager for signal combination
 │   ├── backtesting/       # Walk-forward testing framework
 │   │   ├── results/       # Performance data
 │   │   └── reports/       # Analysis outputs
@@ -40,70 +50,21 @@ ML Alpha Generation System
 │       ├── trained/      # Production models
 │       └── checkpoints/  # Training snapshots
 │
-├── ML Pipeline (Enhanced Existing)
-│   ├── src/              # Core ML components
-│   │   ├── data/         # Zero temporal loss data loading
-│   │   ├── features/     # 149+ feature candidates → 24 selected
-│   │   ├── models/       # Multi-scale LSTM + directional loss
-│   │   └── utils/        # Validation and utilities
-│   └── scripts/          # Pipeline orchestration
+├── ML Pipeline
+│   ├── src/
+│   │   ├── data/
+│   │   ├── features/
+│   │   ├── models/
+│   │   └── utils/
+│   └── scripts/
 │
 └── Documentation
     └── docs/
 ```
 
-## Quick Start
-
-### 1. Setup Infrastructure
-
-```bash
-# Clone and navigate to project root
-cd financial-returns-api
-
-# Start database
-docker-compose up database -d
-
-# Install dependenies
-pip install -r ml-requirements.txt
-
-# Initialize database schema
-python -c "from database.schema import create_tables; from database.connection import get_database_manager; create_tables(get_database_manager().engine)"
-```
-
-### 2. Configure Environment
-
-```bash
-cp config/development.yaml config/local.yaml
-
-vim config/local.yaml  # Update database URL, tickers, etc.
-```
-
-### 3. Train Models
-
-```bash
-# Test existing pipeline
-python scripts/run_production_pipeline.py --quick-test
-
-# Train cross-sectional ranking model
-python -m strategies.cross_sectional.train
-
-# Train multi-timeframe ensemble
-python -m strategies.multi_timeframe.train
-```
-
-### 4. Start API Server
-
-```bash
-# Development server (ML API)
-python run_ml_api.py
-
-# Docker deployment
-docker-compose up
-```
-
 ## Current System Status
 
-### **Working Foundation**
+### **(Working Foundation**
 
 - **Zero Temporal Loss**: 17,998 training samples
 - **Multi-Scale LSTM**: 3.2M parameters with attention mechanisms
@@ -111,13 +72,23 @@ docker-compose up
 - **Bias Fixes Applied**: StandardScaler, fillna fixes, removed artificial negative bias
 - **Production Pipeline**: 5-stage separation of concerns
 - **Performance**: ~ 57% directional accuracy (no magnitude support, combined weekly + daily)
+- **Refactored Strategy System**: Clean pipeline orchestration with focused components
 
-### **In Development (New Infrastructure)**
+### **Completed Infrastructure**
 
-- **Multi-Strategy Models**: Cross-sectional, multi-timeframe, regime-aware
+- **Refactored Pipeline Architecture**: focused components
+- **Strategy Compatibility Checker**: Robust requirement validation
+- **Ensemble Coordinator**: Graceful degradation management
+- **Simplified Data Adapter**: Pure data formatting without validation chains
 - **API Framework**: FastAPI with model serving endpoints
-- **Backtesting**: Walk-forward analysis with transaction costs
 - **Database**: PostgreSQL + TimescaleDB time-series optimization
+
+### **In Development (Phase 2)**
+
+- **Historical Data Integration**: Enhanced backtesting with refactored components
+- **Multi-Strategy Models**: Cross-sectional, multi-timeframe, regime-aware
+- **Component-Aware Metrics**: Performance attribution and degradation analysis
+- **Enhanced Validation**: Historical validation with bootstrap significance testing
 - **Risk Management**: Position sizing, drawdown controls
 
 ## Potential Alpha Generation Strategies
@@ -147,27 +118,6 @@ docker-compose up
 
 ### Multi-Scale LSTM
 
-```python
-# Current architecture (3.2M parameters)
-Short-term Branch:  10-day patterns (128 LSTM units)
-Medium-term Branch: 30-day patterns (512→256 LSTM units)
-Long-term Branch:   Subsampled patterns (128 LSTM units)
-Attention:          Self + cross-scale attention
-Dense Layers:       [256, 128, 64] → single output
-Loss Function:      60% MSE + 40% directional loss
-```
-
-### Feature Engineering Pipeline
-
-```python
-Raw Features:     149 candidates across 8 processors
-Selected:         24 optimal features via category-based selection
-Processing:       StandardScaler (preserves +/- relationships)
-NaN Handling:     Forward/backward fill (to prevent down zero-bias)
-Outlier Control:  Quantile clipping with robust scaling
-Target:           Daily returns with proper temporal alignment
-```
-
 ## Future Performance Targets & Validation
 
 ### **Accuracy Targets**
@@ -193,59 +143,6 @@ Target:           Daily returns with proper temporal alignment
 - **Position Limits**: 1-10% per position
 - **Out of Sample**: Temporal separation
 
-## API Endpoints
-
-### Predictions
-
-```bash
-# Single stock prediction
-POST /predictions/single
-{
-  "ticker": "AAPL",
-  "horizons": [1, 3, 5, 10],
-  "strategy": "ensemble"
-}
-
-# Batch predictions
-POST /predictions/batch
-{
-  "tickers": ["AAPL", "MSFT", "GOOG"],
-  "date": "2025-01-15"
-}
-```
-
-### Portfolio Management
-
-```bash
-# Current positions
-GET /portfolio/positions
-
-# Run backtest
-POST /portfolio/backtest
-{
-  "strategy": "cross_sectional"
-}
-```
-
-### System Health
-
-```bash
-# Health check
-GET /health
-
-# Model status
-GET /info
-```
-
-## Version Management
-
-### Package Versions
-
-- **Python**: 3.12+
-- **TensorFlow**: 2.19.0
-- **FastAPI**: 0.115.0+
-- **SQLAlchemy**: 2.0.36+
-
 ## Development Workflow
 
 ### **Research Phase**
@@ -256,7 +153,7 @@ GET /info
 ### **Implementation Phase**
 
 1. **Strategy Development**: Add to `strategies/{strategy_name}/`
-2. **Backtesting**: Validate with `backtesting/` framework
+2. **Backtesting**: Validate with `backtesting/` and `src/validation/` framework
 3. **API Integration**: Add endpoints to `ml_api/routes/`
 
 ### **Deployment Phase**
@@ -276,10 +173,10 @@ GET /info
 - **Endpoints**: Price data retrieval, ticker management, portfolio formulation, and prediction services
 - **Frontend**: Next.js/React.js interface for data visualization and model interaction
 
-### **Machine Learning Framework**
+### **Machine Learning Framework (in transition period)**
 
 - **Feature Engineering**:
-  - Price momentum and volatility metrics (GARCH(p,q) focused)
+  - Price momentum and volatility metrics
   - Moving averages and Bollinger Bands
   - Volume analysis and market efficiency indicators
   - Support/resistance levels and trend strength
@@ -303,9 +200,8 @@ GET /info
 ### **Neural Network**
 
 - **Multi-Head Attention**: Captures temporal dependencies
-- **Hybrid Architecture**: Combines LSTM, GRU, and CNN components
-- **Custom Loss Functions**: Directional accuracy penalty for trading focused optimization
-- **Regularization**: Layer normalization, dropout, and L2 regularization
+- **Hybrid Architecture**: Combines LSTM, GRU, and CNN componentularization\*\*: Layer normalization, dropout, and L2 regularization
+- **Note**: Currently refactoring LSTM architecture in order to simplify and reduce paramater count to help with overfitting
 
 ### **Production Considerations**
 
@@ -317,25 +213,27 @@ GET /info
 
 ## Current Development Focus
 
-### **Phase 1: Code Refactoring & Cleanup (Current Priority)**
+### **Phase 1: Code Refactoring & Cleanup**
 
-**Status**: **In Progress**
+**Status**: **Completed**
 
 - **Infrastructure Migration**: ML components moved from `ml/` to root level
 - **Dependency Updates**: Python 3.12, latest package versions, removed legacy code
 - **Clean Architecture**: Separated concerns, removed redundant files and old logs
 - **Code Quality**: Standardizing imports, fixing deprecated patterns
 - **Documentation**: API completion, proper type hints, docstring standardization
+- **Strategy System Refactoring**: Complete pipeline orchestration refactor with focused components
 
-### **Phase 2: Infrastructure Foundation (Next)**
+### **Phase 2: Historical Data Integration (Current Priority)**
 
-**Status**: **Mostly Planned**
+**Status**: **In Progress**
 
-- **API Development**: Complete FastAPI routes and model serving endpoints
-- **Database Migration**: Move from SQLite to PostgreSQL + TimescaleDB
-- **Configuration System**: Finalize environment-specific config management
-- **Testing Framework**: Comprehensive test coverage for ML pipeline
-- **Docker Deployment**: Production-ready containerization
+- **Historical Pipeline Integration**: Connect refactored components with existing DataLoader and TimescaleDB
+- **Enhanced Backtesting Framework**: EnsembleBacktestRunner with component-aware metrics
+- **Focused Validation Integration**: StrategyCompatibilityChecker and EnsembleCoordinator with historical validation
+- **Component Attribution**: Performance analysis with focused component insights
+- **API Enhancement**: FastAPI routes for ensemble strategy endpoints
+- **Testing Framework**: Comprehensive integration tests for refactored architecture
 
 ### **Phase 3: Portfolio Management & Trading (Long-term)**
 
@@ -351,49 +249,92 @@ GET /info
 
 ### **Immediate Next Steps (Priority Order)**
 
-1. **Complete API Routes** (`ml_api/routes/`) - predictions, portfolio, health endpoints
-2. **Database Schema Implementation** - migrate from SQLite to PostgreSQL
-3. **Model Serving Pipeline** - load/cache models, prediction serving
-4. **Testing Infrastructure** - unit tests, integration tests, pipeline validation
-5. **Configuration Validation** - ensure all environments work correctly
+1. **Historical Pipeline Adapter** (`src/pipeline/historical/`) - integrate refactored components with existing DataLoader
+2. **Pattern Focused LSTM** integrated into ensemble strategy
+3. **Voting based confidence** to use technical analysis in paralell to LSTM pattern recognition
+4. **Enhanced Backtesting Runner** (`src/pipeline/backtesting/`) - component-aware performance metrics
+5. **Focused Validation Pipeline** (`src/validation/historical_validation_pipeline.py`) - no validation chains
+6. **Integration Testing** - comprehensive tests for refactored architecture with historical data
+7. **API Enhancement** - ensemble strategy endpoints with component attribution
 
 ### **Success Metrics by Phase**
 
-**Phase 1 (Refactoring)**: Complete
+**Phase 1 (Refactoring)**: **Completed**
 
 - Clean, maintainable codebase
-- Standardized development workflow
+- Refactored strategy system with focused components
+- Pipeline orchestration with 10-line execute method
+- No validation chains - direct component ownership
 
-**Phase 2 (Infrastructure)**:
+**Phase 2 (Historical Integration)**: **In Progress**
 
-- API endpoints functional
-- Database migration complete
-- Docker deployment working
-- Test coverage >80%
+- Historical pipeline adapter functional
+- Component-aware backtesting operational
+- Enhanced validation with bootstrap significance testing
+- Performance attribution with graceful degradation analysis
 
-**Phase 3 (Portfolio Management)**:
+**Phase 3 (Production Trading)**: **Planned**
 
-- Backtesting framework operational
+- Multi-strategy models (cross-sectional, multi-timeframe, regime-aware)
 - 52-55% directional accuracy achieved
-- Sharpe ratio >1.0 in paper trading
+- Sharpe ratio >1.0 with ensemble approach
+- Component-specific risk management
 
----
+## Refactored Ensemble Strategy System
 
-### **Technical Debt & Quality**
+### **Key Improvements**
 
-**Completed**:
+- **No Validation Chains**: Direct PipelineValidator ownership eliminates confusion
+- **Focused Components**: Each component has single, clear responsibility
+- **Enhanced Testability**: Components can be tested in isolation
+- **Graceful Degradation**: EnsembleCoordinator handles strategy failures elegantly
 
-- Removed legacy ML directory and redundant files
-- Standardized code formatting (Black, Ruff, pre-commit hooks)
+### **Component Responsibilities**
+
+**Pipeline Orchestration** (`src/pipeline/orchestration/ensemble_data_pipeline.py`):
+
+- Coordinates 5 focused execution stages
+- Direct PipelineValidator ownership
+- Centralized error handling and results packaging
+
+**Strategy Compatibility Checker** (`src/strategies/core/compatibility_checker.py`):
+
+- Validates data against strategy requirements
+- Feature quality checks (NaN ratios, RSI ranges, ATR positivity)
+- Fallback feature mapping
+
+**Ensemble Coordinator** (`src/pipeline/coordination/ensemble_coordinator.py`):
+
+- Multi-strategy ensemble logic with graceful degradation
+- Strategy validation coordination
+- Comprehensive failure reporting
+
+**Simplified Data Adapter** (`src/strategies/adapters/data_adapter.py`):
+
+- Pure data formatting and cleaning
+- Feature fallback application
+- Removed validation and ensemble logic (moved to focused components)
+
+### **Testing and Validation**
+
+**Test Suite**:
+
+- Unit tests for each focused component
+- Integration tests for end-to-end pipeline execution
+- Component isolation testing for maintainability
+- Performance benchmarking of refactored architecture
+
+**Validation Framework Integration**:
+
+- Direct PipelineValidator usage (no chains)
+- Strategy-specific validation with StrategyCompatibilityChecker
+- Ensemble robustness testing with EnsembleCoordinator
+- Integration with existing GappedTimeSeriesCV and bootstrap methods
 
 **Ongoing**:
 
 - Type hint standardization across codebase
-- Docstring completion for all public APIs
+- Docstring completion
 - Import optimization and dependency cleanup
-
----
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
+- Phase 2 historical data integration with refactored architecture
+- non linear pattern recognition LSTM creation

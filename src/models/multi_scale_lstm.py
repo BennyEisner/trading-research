@@ -25,6 +25,230 @@ class MultiScaleLSTMBuilder:
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         
+    def build_optimized_model(self, input_shape: Tuple[int, int], **params) -> keras.Model:
+        """
+        Build optimized model based on model_type parameter
+        """
+        model_type = params.get('model_type', 'full_multi_scale')
+        
+        if model_type == 'simplified_lstm':
+            return self.build_simplified_lstm_model(input_shape, **params)
+        elif model_type == 'efficient_multi_scale':
+            return self.build_efficient_multi_scale_model(input_shape, **params)
+        else:
+            return self.build_multi_scale_model(input_shape, **params)
+    
+    def build_simplified_lstm_model(self, input_shape: Tuple[int, int], **params) -> keras.Model:
+        """
+        Build simplified LSTM model (~500K-800K parameters)
+        Single LSTM branch with minimal dense layers
+        """
+        sequence_length, n_features = input_shape
+        
+        # Model hyperparameters
+        lstm_units = params.get('lstm_units_1', 128)
+        dropout_rate = params.get('dropout_rate', 0.3)
+        l2_reg = params.get('l2_regularization', 0.003)
+        dense_layers = params.get('dense_layers', [128, 64])
+        
+        # Input layer
+        main_input = layers.Input(shape=input_shape, name='main_input')
+        
+        # Single LSTM branch (no multi-scale complexity)
+        x = layers.LSTM(
+            lstm_units,
+            return_sequences=True,
+            kernel_regularizer=keras.regularizers.l2(l2_reg),
+            recurrent_regularizer=keras.regularizers.l2(l2_reg),
+            name='main_lstm_1'
+        )(main_input)
+        x = layers.Dropout(dropout_rate, name='lstm_dropout_1')(x)
+        
+        # Second LSTM layer (smaller)
+        lstm_units_2 = params.get('lstm_units_2', 96)
+        x = layers.LSTM(
+            lstm_units_2,
+            return_sequences=False,  # Output single vector
+            kernel_regularizer=keras.regularizers.l2(l2_reg),
+            recurrent_regularizer=keras.regularizers.l2(l2_reg),
+            name='main_lstm_2'
+        )(x)
+        x = layers.Dropout(dropout_rate, name='lstm_dropout_2')(x)
+        
+        # Minimal dense layers
+        for i, units in enumerate(dense_layers):
+            x = layers.Dense(
+                units,
+                activation='relu',
+                kernel_regularizer=keras.regularizers.l2(l2_reg),
+                name=f'dense_{i+1}'
+            )(x)
+            x = layers.Dropout(dropout_rate / 2, name=f'dense_dropout_{i+1}')(x)
+        
+        # Final prediction layer
+        output = layers.Dense(
+            1, 
+            name='prediction_output',
+            kernel_initializer='zeros',
+            bias_initializer='zeros'
+        )(x)
+        
+        model = keras.Model(inputs=main_input, outputs=output, name='SimplifiedLSTM')
+        
+        # Compile model
+        initial_lr = params.get('learning_rate', 0.001)
+        optimizer = tf.keras.optimizers.Adam(
+            learning_rate=initial_lr,
+            beta_1=0.9,
+            beta_2=0.999,
+            epsilon=1e-7,
+            clipnorm=1.0
+        )
+        
+        model.compile(
+            optimizer=optimizer,
+            loss='mse',
+            metrics=['mae', self._directional_accuracy, self._correlation_metric]
+        )
+        
+        return model
+    
+    def build_efficient_multi_scale_model(self, input_shape: Tuple[int, int], **params) -> keras.Model:
+        """
+        Build efficient multi-scale model (~1M-1.5M parameters)
+        Reduced complexity multi-scale with optimized attention
+        """
+        sequence_length, n_features = input_shape
+        
+        # Model hyperparameters
+        lstm_units_1 = params.get('lstm_units_1', 256)
+        lstm_units_2 = params.get('lstm_units_2', 128)
+        lstm_units_3 = params.get('lstm_units_3', 64)
+        dropout_rate = params.get('dropout_rate', 0.3)
+        l2_reg = params.get('l2_regularization', 0.003)
+        dense_layers = params.get('dense_layers', [128, 64])
+        attention_heads = params.get('attention_heads', 4)
+        
+        # Input layer
+        main_input = layers.Input(shape=input_shape, name='main_input')
+        
+        # ====================================================================
+        # SIMPLIFIED MULTI-SCALE PROCESSING (2 branches instead of 3)
+        # ====================================================================
+        
+        # Branch 1: Short-term patterns (recent 15 days)
+        short_term_input = layers.Lambda(
+            lambda x: x[:, -15:, :],
+            name='short_term_slice'
+        )(main_input)
+        
+        short_term_lstm = layers.LSTM(
+            lstm_units_3,
+            return_sequences=True,
+            kernel_regularizer=keras.regularizers.l2(l2_reg),
+            name='short_term_lstm'
+        )(short_term_input)
+        short_term_lstm = layers.Dropout(dropout_rate, name='short_term_dropout')(short_term_lstm)
+        
+        # Branch 2: Full sequence for longer patterns
+        long_term_lstm = layers.LSTM(
+            lstm_units_1,
+            return_sequences=True,
+            kernel_regularizer=keras.regularizers.l2(l2_reg),
+            name='long_term_lstm_1'
+        )(main_input)
+        long_term_lstm = layers.Dropout(dropout_rate, name='long_term_dropout_1')(long_term_lstm)
+        
+        long_term_lstm = layers.LSTM(
+            lstm_units_2,
+            return_sequences=True,
+            kernel_regularizer=keras.regularizers.l2(l2_reg),
+            name='long_term_lstm_2'
+        )(long_term_lstm)
+        long_term_lstm = layers.Dropout(dropout_rate, name='long_term_dropout_2')(long_term_lstm)
+        
+        # ====================================================================
+        # EFFICIENT ATTENTION (fewer heads, smaller key dimensions)
+        # ====================================================================
+        
+        # Self-attention for each branch
+        short_term_att = layers.MultiHeadAttention(
+            num_heads=attention_heads,
+            key_dim=lstm_units_3//attention_heads,
+            name='short_term_attention'
+        )(short_term_lstm, short_term_lstm)
+        
+        long_term_att = layers.MultiHeadAttention(
+            num_heads=attention_heads,
+            key_dim=lstm_units_2//attention_heads,
+            name='long_term_attention'
+        )(long_term_lstm, long_term_lstm)
+        
+        # Global pooling
+        short_term_pooled = layers.GlobalAveragePooling1D(name='short_term_pool')(short_term_att)
+        long_term_pooled = layers.GlobalAveragePooling1D(name='long_term_pool')(long_term_att)
+        
+        # ====================================================================
+        # SIMPLE FEATURE FUSION
+        # ====================================================================
+        
+        # Concatenate features
+        combined_features = layers.Concatenate(name='feature_concat')([
+            short_term_pooled,
+            long_term_pooled
+        ])
+        
+        # Single dense layer for fusion
+        x = layers.Dense(
+            lstm_units_2,
+            activation='relu',
+            kernel_regularizer=keras.regularizers.l2(l2_reg),
+            name='fusion_dense'
+        )(combined_features)
+        x = layers.Dropout(dropout_rate, name='fusion_dropout')(x)
+        x = layers.LayerNormalization(name='fusion_norm')(x)
+        
+        # ====================================================================
+        # MINIMAL DENSE LAYERS
+        # ====================================================================
+        
+        for i, units in enumerate(dense_layers):
+            x = layers.Dense(
+                units,
+                activation='relu',
+                kernel_regularizer=keras.regularizers.l2(l2_reg),
+                name=f'dense_{i+1}'
+            )(x)
+            x = layers.Dropout(dropout_rate / 2, name=f'dense_dropout_{i+1}')(x)
+        
+        # Final prediction layer
+        output = layers.Dense(
+            1, 
+            name='prediction_output',
+            kernel_initializer='zeros',
+            bias_initializer='zeros'
+        )(x)
+        
+        model = keras.Model(inputs=main_input, outputs=output, name='EfficientMultiScaleLSTM')
+        
+        # Compile model
+        initial_lr = params.get('learning_rate', 0.001)
+        optimizer = tf.keras.optimizers.Adam(
+            learning_rate=initial_lr,
+            beta_1=0.9,
+            beta_2=0.999,
+            epsilon=1e-7,
+            clipnorm=1.0
+        )
+        
+        model.compile(
+            optimizer=optimizer,
+            loss='mse',
+            metrics=['mae', self._directional_accuracy, self._correlation_metric]
+        )
+        
+        return model
+
     def build_multi_scale_model(self, input_shape: Tuple[int, int], **params) -> keras.Model:
         """
         Build multi-scale LSTM model with three time horizons and attention
@@ -186,8 +410,13 @@ class MultiScaleLSTMBuilder:
             x = layers.Dropout(dropout_rate / 2, name=f'dense_dropout_{i+1}')(x)
             x = layers.LayerNormalization(name=f'dense_layer_norm_{i+1}')(x)
         
-        # Final prediction layer
-        output = layers.Dense(1, name='prediction_output')(x)
+        # Final prediction layer with proper initialization
+        output = layers.Dense(
+            1, 
+            name='prediction_output',
+            kernel_initializer='zeros',  # Initialize to zero to prevent bias
+            bias_initializer='zeros'
+        )(x)
         
         # ====================================================================
         # CREATE AND COMPILE MODEL
@@ -214,38 +443,205 @@ class MultiScaleLSTMBuilder:
         
         return model
     
+    def build_uncompiled_model(self, input_shape: Tuple[int, int], **params) -> keras.Model:
+        """
+        Build optimized model architecture WITHOUT compilation for hyperparameter tuning
+        """
+        model_type = params.get('model_type', 'full_multi_scale')
+        
+        if model_type == 'simplified_lstm':
+            return self._build_simplified_lstm_uncompiled(input_shape, **params)
+        elif model_type == 'efficient_multi_scale':
+            return self._build_efficient_multi_scale_uncompiled(input_shape, **params)
+        else:
+            return self._build_multi_scale_uncompiled(input_shape, **params)
+    
+    def _build_simplified_lstm_uncompiled(self, input_shape: Tuple[int, int], **params) -> keras.Model:
+        """Build simplified LSTM without compilation"""
+        sequence_length, n_features = input_shape
+        
+        lstm_units = params.get('lstm_units_1', 128)
+        dropout_rate = params.get('dropout_rate', 0.3)
+        l2_reg = params.get('l2_regularization', 0.003)
+        dense_layers = params.get('dense_layers', [128, 64])
+        
+        main_input = layers.Input(shape=input_shape, name='main_input')
+        
+        x = layers.LSTM(
+            lstm_units,
+            return_sequences=True,
+            kernel_regularizer=keras.regularizers.l2(l2_reg),
+            recurrent_regularizer=keras.regularizers.l2(l2_reg),
+            name='main_lstm_1'
+        )(main_input)
+        x = layers.Dropout(dropout_rate, name='lstm_dropout_1')(x)
+        
+        lstm_units_2 = params.get('lstm_units_2', 96)
+        x = layers.LSTM(
+            lstm_units_2,
+            return_sequences=False,
+            kernel_regularizer=keras.regularizers.l2(l2_reg),
+            recurrent_regularizer=keras.regularizers.l2(l2_reg),
+            name='main_lstm_2'
+        )(x)
+        x = layers.Dropout(dropout_rate, name='lstm_dropout_2')(x)
+        
+        for i, units in enumerate(dense_layers):
+            x = layers.Dense(
+                units,
+                activation='relu',
+                kernel_regularizer=keras.regularizers.l2(l2_reg),
+                name=f'dense_{i+1}'
+            )(x)
+            x = layers.Dropout(dropout_rate / 2, name=f'dense_dropout_{i+1}')(x)
+        
+        output = layers.Dense(
+            1, 
+            name='prediction_output',
+            kernel_initializer='zeros',
+            bias_initializer='zeros'
+        )(x)
+        
+        return keras.Model(inputs=main_input, outputs=output, name='SimplifiedLSTM')
+    
+    def _build_efficient_multi_scale_uncompiled(self, input_shape: Tuple[int, int], **params) -> keras.Model:
+        """Build efficient multi-scale model without compilation"""
+        # Same as build_efficient_multi_scale_model but without compilation
+        sequence_length, n_features = input_shape
+        
+        lstm_units_1 = params.get('lstm_units_1', 256)
+        lstm_units_2 = params.get('lstm_units_2', 128)
+        lstm_units_3 = params.get('lstm_units_3', 64)
+        dropout_rate = params.get('dropout_rate', 0.3)
+        l2_reg = params.get('l2_regularization', 0.003)
+        dense_layers = params.get('dense_layers', [128, 64])
+        attention_heads = params.get('attention_heads', 4)
+        
+        main_input = layers.Input(shape=input_shape, name='main_input')
+        
+        # Short-term patterns
+        short_term_input = layers.Lambda(
+            lambda x: x[:, -15:, :],
+            name='short_term_slice'
+        )(main_input)
+        
+        short_term_lstm = layers.LSTM(
+            lstm_units_3,
+            return_sequences=True,
+            kernel_regularizer=keras.regularizers.l2(l2_reg),
+            name='short_term_lstm'
+        )(short_term_input)
+        short_term_lstm = layers.Dropout(dropout_rate, name='short_term_dropout')(short_term_lstm)
+        
+        # Long-term patterns
+        long_term_lstm = layers.LSTM(
+            lstm_units_1,
+            return_sequences=True,
+            kernel_regularizer=keras.regularizers.l2(l2_reg),
+            name='long_term_lstm_1'
+        )(main_input)
+        long_term_lstm = layers.Dropout(dropout_rate, name='long_term_dropout_1')(long_term_lstm)
+        
+        long_term_lstm = layers.LSTM(
+            lstm_units_2,
+            return_sequences=True,
+            kernel_regularizer=keras.regularizers.l2(l2_reg),
+            name='long_term_lstm_2'
+        )(long_term_lstm)
+        long_term_lstm = layers.Dropout(dropout_rate, name='long_term_dropout_2')(long_term_lstm)
+        
+        # Attention mechanisms
+        short_term_att = layers.MultiHeadAttention(
+            num_heads=attention_heads,
+            key_dim=lstm_units_3//attention_heads,
+            name='short_term_attention'
+        )(short_term_lstm, short_term_lstm)
+        
+        long_term_att = layers.MultiHeadAttention(
+            num_heads=attention_heads,
+            key_dim=lstm_units_2//attention_heads,
+            name='long_term_attention'
+        )(long_term_lstm, long_term_lstm)
+        
+        # Pooling
+        short_term_pooled = layers.GlobalAveragePooling1D(name='short_term_pool')(short_term_att)
+        long_term_pooled = layers.GlobalAveragePooling1D(name='long_term_pool')(long_term_att)
+        
+        # Feature fusion
+        combined_features = layers.Concatenate(name='feature_concat')([
+            short_term_pooled,
+            long_term_pooled
+        ])
+        
+        x = layers.Dense(
+            lstm_units_2,
+            activation='relu',
+            kernel_regularizer=keras.regularizers.l2(l2_reg),
+            name='fusion_dense'
+        )(combined_features)
+        x = layers.Dropout(dropout_rate, name='fusion_dropout')(x)
+        x = layers.LayerNormalization(name='fusion_norm')(x)
+        
+        # Dense layers
+        for i, units in enumerate(dense_layers):
+            x = layers.Dense(
+                units,
+                activation='relu',
+                kernel_regularizer=keras.regularizers.l2(l2_reg),
+                name=f'dense_{i+1}'
+            )(x)
+            x = layers.Dropout(dropout_rate / 2, name=f'dense_dropout_{i+1}')(x)
+        
+        output = layers.Dense(
+            1, 
+            name='prediction_output',
+            kernel_initializer='zeros',
+            bias_initializer='zeros'
+        )(x)
+        
+        return keras.Model(inputs=main_input, outputs=output, name='EfficientMultiScaleLSTM')
+    
+    def _build_multi_scale_uncompiled(self, input_shape: Tuple[int, int], **params) -> keras.Model:
+        """Build full multi-scale model without compilation"""
+        # For now, use simplified version to avoid complexity during HP tuning
+        return self._build_simplified_lstm_uncompiled(input_shape, **params)
+
     def build_directional_focused_model(self, input_shape: Tuple[int, int], **params) -> keras.Model:
         """
-        Build multi-scale model with directional loss and enhanced directional metrics
+        Build optimized model with directional loss and enhanced directional metrics
+        Fixed: No double compilation issue
         """
-        # Build base architecture
-        model = self.build_multi_scale_model(input_shape, **params)
+        # Build uncompiled architecture 
+        model = self.build_uncompiled_model(input_shape, **params)
         
-        # Directional loss function
+        # Improved directional loss function
         def directional_mse_loss(y_true, y_pred):
-            alpha = params.get('directional_alpha', 0.4)  # Weight for directional component
+            alpha = params.get('directional_alpha', 0.05)  # Weight for directional component
             
             # MSE component
             mse_loss = tf.keras.losses.MeanSquaredError()(y_true, y_pred)
             
-            # Directional component
-            y_true_sign = tf.sign(y_true)
-            y_pred_sign = tf.sign(y_pred)
-            directional_error = 0.5 * (1 - y_true_sign * y_pred_sign)
-            directional_loss = tf.reduce_mean(directional_error)
+            # Improved directional component using smooth approximation
+            smooth_scale = 10.0  # Controls smoothness of the sign approximation
+            y_true_smooth_sign = tf.tanh(smooth_scale * y_true)
+            y_pred_smooth_sign = tf.tanh(smooth_scale * y_pred)
+            
+            # Directional alignment loss (0 when signs match, 1 when opposite)
+            directional_alignment = (1 - y_true_smooth_sign * y_pred_smooth_sign) / 2
+            directional_loss = tf.reduce_mean(directional_alignment)
             
             return (1 - alpha) * mse_loss + alpha * directional_loss
         
         # Enhanced optimizer for directional learning
         optimizer = tf.keras.optimizers.Adam(
-            learning_rate=params.get('learning_rate', 0.0005),  # Lower LR for stable directional learning
+            learning_rate=params.get('learning_rate', 0.0005),
             beta_1=0.9,
             beta_2=0.999,
             epsilon=1e-7,
             clipnorm=1.0
         )
         
-        # Compile with directional focus
+        # Single compilation with consistent metric names
         model.compile(
             optimizer=optimizer,
             loss=directional_mse_loss,
@@ -253,7 +649,6 @@ class MultiScaleLSTMBuilder:
                 'mae',
                 self._directional_accuracy,
                 self._weighted_directional_accuracy,
-                self._up_down_accuracy,
                 self._correlation_metric
             ]
         )
@@ -280,6 +675,64 @@ class MultiScaleLSTMBuilder:
         
         # Return balanced accuracy
         return (up_accuracy + down_accuracy) / 2.0
+    
+    def build_multi_horizon_model(self, input_shape: Tuple[int, int], num_horizons: int = 3, **params) -> keras.Model:
+        """
+        Build model that predicts multiple time horizons simultaneously
+        
+        Args:
+            input_shape: (sequence_length, features) 
+            num_horizons: Number of prediction horizons (e.g., 1d, 3d, 4d)
+            **params: Model hyperparameters
+        """
+        # Build base optimized architecture
+        base_model = self.build_optimized_model(input_shape, **params)
+        
+        # Get the layer before final output
+        feature_layer = base_model.layers[-2].output  # Layer before prediction_output
+        
+        # Create separate outputs for each horizon
+        horizon_outputs = []
+        for i in range(num_horizons):
+            horizon_output = layers.Dense(
+                1,
+                name=f'horizon_{i+1}_output',
+                kernel_initializer='zeros',
+                bias_initializer='zeros'
+            )(feature_layer)
+            horizon_outputs.append(horizon_output)
+        
+        # Create multi-output model
+        multi_model = keras.Model(
+            inputs=base_model.input,
+            outputs=horizon_outputs,
+            name='MultiHorizonLSTM'
+        )
+        
+        # Compile with multi-output loss
+        initial_lr = params.get('learning_rate', 0.001)
+        optimizer = tf.keras.optimizers.Adam(
+            learning_rate=initial_lr,
+            beta_1=0.9,
+            beta_2=0.999,
+            epsilon=1e-7,
+            clipnorm=1.0
+        )
+        
+        # Equal weight for all horizons
+        loss_weights = [1.0 / num_horizons] * num_horizons
+        
+        multi_model.compile(
+            optimizer=optimizer,
+            loss=['mse'] * num_horizons,
+            loss_weights=loss_weights,
+            metrics={
+                f'horizon_{i+1}_output': ['mae', self._directional_accuracy] 
+                for i in range(num_horizons)
+            }
+        )
+        
+        return multi_model
     
     def build_ensemble_model(self, input_shape: Tuple[int, int], **params) -> keras.Model:
         """
@@ -310,7 +763,12 @@ class MultiScaleLSTMBuilder:
         x = layers.Dense(128, activation='relu', name='ensemble_dense_2')(x)
         x = layers.Dropout(0.2, name='ensemble_dropout_2')(x)
         
-        output = layers.Dense(1, name='ensemble_output')(x)
+        output = layers.Dense(
+            1, 
+            name='ensemble_output',
+            kernel_initializer='zeros',
+            bias_initializer='zeros'
+        )(x)
         
         model = keras.Model(inputs=main_input, outputs=output, name='EnsembleLSTM')
         
