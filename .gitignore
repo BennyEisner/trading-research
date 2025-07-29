@@ -89,6 +89,7 @@ dmypy.json
 #Documentation builds
 docs/_build/
 docs/memory-bank
+docs/
 
 # Mac
 .DS_Store
