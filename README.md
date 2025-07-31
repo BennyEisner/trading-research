@@ -80,7 +80,6 @@ Ensemble Trading System with LSTM Pattern Verification
 - **Multi-Ticker Training**: 27 expanded universe securities → MAG7 specialization
 - **Pattern Target Generation**: Binary pattern validation (not return prediction)
 - **Overlapping Sequences**: 20-day lookback, 5-day stride for swing trading optimization
-- **Clean Architecture**: 1,200+ lines of legacy code archived
 
 ### **Ready for Implementation**
 
