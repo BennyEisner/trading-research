@@ -1,32 +1,26 @@
 # Production Configuration
-# Full-scale settings for live trading research
-
+# Full-scale settings for live trading
 environment: "production"
 log_level: "INFO"
-
 database:
   url: "postgresql://trader:secure_password@localhost:5432/trading_research"
   echo: false
   pool_size: 10
   max_overflow: 20
-
 model:
-  # Full dataset with optimized parameters
   tickers: ["AAPL", "MSFT", "GOOG", "NVDA", "TSLA", "AMZN", "META"]
   lookback_window: 30
-  prediction_horizon: 3  # 3-day prediction horizon (changed from daily to 3-day for less noise)
+  prediction_horizon: 3
   target_features: 24
-  model_size: "medium"  # Options: "small" (~500K-800K), "medium" (~1M-1.5M), "large" (~3M+)
-  
+  model_size: "medium"
   training_params:
     batch_size: 64
     epochs: 100
     learning_rate: 0.0005
-    patience: 5  # Fixed: reduced from 15 for faster convergence
+    patience: 5
     validation_split: 0.2
-    monitor_metric: "val__directional_accuracy"  # Fixed: correct TensorFlow metric name (double underscore)
+    monitor_metric: "val__directional_accuracy"
     early_stopping_mode: "max"
-
 backtest:
   transaction_cost: 0.001
   min_position_size: 0.01
@@ -36,7 +30,6 @@ backtest:
   training_window_days: 252
   rebalance_frequency_days: 5
   walk_forward_window_days: 30
-
 api:
   host: "0.0.0.0"
   port: 8000
@@ -44,3 +37,4 @@ api:
   log_level: "INFO"
   model_cache_size: 5
   prediction_timeout: 30
+

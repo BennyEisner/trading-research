@@ -59,9 +59,9 @@ def check_data_volume():
     print(f"EXPECTED (15 years): {expected_per_ticker} per ticker")
     
     if total_records > expected_per_ticker * len(tickers) * 0.8:  # 80% threshold
-        print("✅ SUFFICIENT DATA FOR TRAINING")
+        print("SUFFICIENT DATA FOR TRAINING")
     else:
-        print("❌ INSUFFICIENT DATA - Re-run pipeline to populate more data")
+        print("INSUFFICIENT DATA - Re-run pipeline to populate more data")
     
     print("=" * 60)
 

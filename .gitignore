@@ -66,6 +66,7 @@ data/
 
 # Docker
 .dockerignore
+docker-compose.yml
 
 # Node.js (for frontend)
 node_modules/
@@ -128,4 +129,7 @@ temp/
 tmp/
 
 src/validation/tests/.hypothesis
+archive/investigation
+production_runs/
+internal/
 

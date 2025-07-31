@@ -1,106 +1,101 @@
 #!/usr/bin/env python3
 
 """
-Factory for creating feature engineering pipeline
+Pattern Detection Feature Factory
+Focused on 17 pattern features for LSTM pattern detection specialist
 """
 
 from .base import BaseFeatureProcessor
-from .processors.market_features import MarketFeaturesProcessor
-from .processors.price_features import PriceFeaturesProcessor
-from .processors.technical_indicators import TechnicalIndicatorsProcessor
-from .processors.volatility_features import VolatilityFeaturesProcessor
-from .processors.volume_features import VolumeFeaturesProcessor
-from .simple_selector import SimpleCategorySelector
+from .processors.pattern_features_processor import PatternFeaturesProcessor
+from .pattern_feature_calculator import FeatureCalculator
+from .multi_ticker_engine import MultiTickerPatternEngine
 
 
-class FeatureEngineeringFactory:
-    """Factory for creating complete feature engineering pipeline"""
+class PatternDetectionFactory:
+    """Factory for creating pattern detection feature pipeline (17 features only)"""
 
-    def __init__(self, config=None):
+    def __init__(self, config=None, market_data=None, sector_data=None, vix_data=None):
         self.config = config or {}
-        self.processors = []
-        self.selector = None
+        self.market_data = market_data
+        self.sector_data = sector_data or {}
+        self.vix_data = vix_data
         self._setup_pipeline()
 
     def _setup_pipeline(self):
-        """Setup the feature engineering pipeline"""
-        # Initialize processors in order
-        self.processors = [
-            PriceFeaturesProcessor(),
-            TechnicalIndicatorsProcessor(),
-            VolatilityFeaturesProcessor(),
-            VolumeFeaturesProcessor(),
-            MarketFeaturesProcessor(),
-        ]
+        """Setup the pattern detection pipeline"""
+        # Only use pattern features processor (17 features)
+        self.pattern_processor = PatternFeaturesProcessor(
+            market_data=self.market_data,
+            sector_data=self.sector_data,
+            vix_data=self.vix_data
+        )
 
-        # Initialize feature selector
-        self.selector = SimpleCategorySelector()
+    def calculate_pattern_features(self, data, symbol="UNKNOWN"):
+        """Calculate 17 pattern features only"""
+        # Use pattern processor to calculate all 17 pattern features
+        pattern_features = self.pattern_processor.calculate(data)
+        return pattern_features
 
-    def calculate_all_features(self, data):
-        """Calculate all features using the pipeline"""
-        from .feature_engineer import FeatureEngineer
+    def create_pattern_calculator(self, symbol="UNKNOWN"):
+        """Create pattern feature calculator for single ticker"""
+        return FeatureCalculator(
+            symbol=symbol,
+            market_data=self.market_data,
+            sector_data=self.sector_data.get(symbol),
+            vix_data=self.vix_data
+        )
 
-        # Create instance and calculate features
-        feature_eng = FeatureEngineer()
-        processed_data = feature_eng.calculate_all_features(data)
+    def create_multi_ticker_engine(self, tickers, max_workers=4):
+        """Create multi-ticker pattern engine"""
+        return MultiTickerPatternEngine(
+            tickers=tickers,
+            max_workers=max_workers,
+            market_data=self.market_data,
+            sector_data=self.sector_data,
+            vix_data=self.vix_data
+        )
 
-        return processed_data
+    def get_pattern_feature_names(self):
+        """Get list of 17 pattern feature names"""
+        return self.pattern_processor.feature_names
 
-    def select_stable_features(self, data):
-        """Select stable features using ensemble selector"""
-        # Get all feature columns (exclude basic OHLCV)
-        basic_columns = ["date", "open", "high", "low", "close", "volume"]
-        feature_columns = [col for col in data.columns if col not in basic_columns]
-
-        if not feature_columns:
-            return basic_columns[1:]  # Return OHLCV without date
-
-        # Use category selector if we have features
-        try:
-            # Convert to format expected by SimpleCategorySelector
-            X = data[feature_columns]
-            y = data["daily_return"].fillna(0).values  # Need target for selection
-
-            # Use fit_transform method
-            selected_data = self.selector.fit_transform(X, y)
-            return basic_columns[1:] + selected_data.columns.tolist()  # Include OHLCV + selected
-        except Exception as e:
-            print(f"Warning: Feature selection failed ({e}), using all features")
-            return feature_columns
-
-    def get_feature_dimensions(self, data):
-        """Get number of features after processing and selection"""
-        processed_data = self.calculate_all_features(data)
-        selected_columns = self.select_stable_features(processed_data)
-        return len(selected_columns)
-
-    def validate_pipeline(self, data):
-        """Validate the feature engineering pipeline"""
+    def validate_pattern_pipeline(self, data, symbol="UNKNOWN"):
+        """Validate the pattern detection pipeline"""
         issues = []
 
         try:
-            # Test feature calculation
-            processed_data = self.calculate_all_features(data)
-            if processed_data is None or len(processed_data) == 0:
-                issues.append("Feature calculation returned empty data")
+            # Test pattern feature calculation
+            pattern_features = self.calculate_pattern_features(data, symbol)
+            if pattern_features is None or len(pattern_features) == 0:
+                issues.append("Pattern feature calculation returned empty data")
 
-            # Test feature selection
-            selected_features = self.select_stable_features(processed_data)
-            if not selected_features:
-                issues.append("Feature selection returned no features")
+            # Check that we have exactly 17 pattern features + context
+            expected_features = len(self.pattern_processor.feature_names)
+            actual_features = len([col for col in pattern_features.columns 
+                                if col in self.pattern_processor.feature_names])
+            
+            if actual_features != expected_features:
+                issues.append(f"Expected {expected_features} pattern features, got {actual_features}")
 
-            # Check for NaN values in selected features
-            feature_data = processed_data[selected_features]
-            if feature_data.isna().sum().sum() > 0:
-                issues.append("Selected features contain NaN values")
+            # Check for excessive NaN values
+            pattern_feature_data = pattern_features[self.pattern_processor.feature_names]
+            nan_percentage = pattern_feature_data.isna().sum().sum() / (len(pattern_feature_data) * len(self.pattern_processor.feature_names))
+            
+            if nan_percentage > 0.1:  # More than 10% NaN
+                issues.append(f"Pattern features contain {nan_percentage:.1%} NaN values")
 
         except Exception as e:
-            issues.append(f"Pipeline validation error: {e}")
+            issues.append(f"Pattern pipeline validation error: {e}")
 
         return len(issues) == 0, issues
 
 
-def create_feature_engineer(config=None):
-    """Convenience function to create feature engineering factory"""
-    return FeatureEngineeringFactory(config)
+def create_pattern_detection_factory(config=None, market_data=None, sector_data=None, vix_data=None):
+    """Convenience function to create pattern detection factory"""
+    return PatternDetectionFactory(
+        config=config,
+        market_data=market_data,
+        sector_data=sector_data,
+        vix_data=vix_data
+    )
 

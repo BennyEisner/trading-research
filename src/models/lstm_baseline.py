@@ -21,7 +21,7 @@ from sklearn.model_selection import TimeSeriesSplit
 sys.path.append(str(Path(__file__).parent.parent))
 
 from config.config import get_config
-from models.pattern_focused_lstm import PatternFocusedLSTMBuilder
+from models.shared_backbone_lstm import SharedBackboneLSTMBuilder
 
 
 class LSTMBaselineValidator:
@@ -32,12 +32,15 @@ class LSTMBaselineValidator:
 
     def __init__(self):
         self.config = get_config()
-        self.lstm_builder = PatternFocusedLSTMBuilder(self.config.dict())
+        self.lstm_builder = SharedBackboneLSTMBuilder(self.config.dict())
         self.logger = self._setup_logging()
 
-        # Performance targets
+        # Pattern detection performance targets
         self.targets = {
-            "directional_accuracy": 0.52,  # Minimum for ensemble integration
+            "pattern_detection_accuracy": 0.55,  # Minimum for pattern detection specialist
+            "momentum_pattern_accuracy": 0.55,  # Individual pattern thresholds
+            "volatility_pattern_accuracy": 0.55,
+            "trend_pattern_accuracy": 0.55,
             "sharpe_ratio": 0.8,
             "max_drawdown": 0.15,
             "correlation": 0.25,  # Signal quality threshold
@@ -63,7 +66,7 @@ class LSTMBaselineValidator:
         Perform walk-forward LSTM validation
 
         Args:
-            features: Pattern features (n_samples, 30, 12)
+            features: Pattern features (n_samples, 30, 17) - Updated for new pattern feature set
             targets: Future returns
             data: Market data with timestamps
 
@@ -98,7 +101,7 @@ class LSTMBaselineValidator:
             fold_metrics["fold"] = fold
             fold_results.append(fold_metrics)
 
-            self.logger.info(f"Fold {fold + 1} - Accuracy: {fold_metrics['directional_accuracy']:.3f}")
+            self.logger.info(f"Fold {fold + 1} - Pattern Detection Accuracy: {fold_metrics['pattern_detection_accuracy']:.3f}")
 
         # Aggregate results
         final_results = self._aggregate_results(fold_results)
@@ -124,7 +127,7 @@ class LSTMBaselineValidator:
         model_config = {**self.config.model.model_params, **self.config.model.training_params}
 
         # Build model
-        input_shape = (X_train.shape[1], X_train.shape[2])  # (30, 12)
+        input_shape = (X_train.shape[1], X_train.shape[2])  # (30, 17) - Updated for pattern features
         model = self.lstm_builder.build_model(input_shape, **model_config)
 
         # Prepare callbacks
@@ -147,41 +150,42 @@ class LSTMBaselineValidator:
         return model
 
     def _calculate_fold_metrics(self, y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
-        """Calculate metrics for validation fold"""
+        """Calculate metrics for validation fold - Updated for pattern detection"""
 
-        # Directional accuracy
-        y_true_direction = np.sign(y_true)
-        y_pred_direction = np.sign(y_pred)
-        directional_accuracy = accuracy_score(y_true_direction, y_pred_direction)
+        # Pattern detection accuracy (assuming y_true and y_pred are pattern confidence scores 0-1)
+        # Convert to binary classification with 0.5 threshold
+        y_true_binary = (y_true > 0.5).astype(int)
+        y_pred_binary = (y_pred > 0.5).astype(int)
+        pattern_detection_accuracy = accuracy_score(y_true_binary, y_pred_binary)
 
         # Correlation
         correlation = np.corrcoef(y_true, y_pred)[0, 1] if len(y_true) > 1 else 0.0
 
-        # Trading metrics
-        strategy_returns = y_pred_direction * y_true
-
-        # Sharpe ratio (annualized)
-        sharpe_ratio = (
-            (np.mean(strategy_returns) / np.std(strategy_returns) * np.sqrt(252))
-            if np.std(strategy_returns) > 0
-            else 0.0
+        # Pattern-based metrics (simplified since we're not doing return prediction)
+        # For pattern detection, we focus on pattern recognition accuracy
+        
+        # Pattern confidence correlation
+        pattern_confidence_corr = correlation  # Reuse correlation for pattern confidence
+        
+        # Pattern precision (how often high confidence predictions are correct)
+        high_conf_mask = y_pred > 0.7
+        pattern_precision = (
+            np.mean(y_true_binary[high_conf_mask] == y_pred_binary[high_conf_mask])
+            if np.sum(high_conf_mask) > 0 else 0.0
+        )
+        
+        # Pattern recall (how often true patterns are detected)
+        true_pattern_mask = y_true > 0.5
+        pattern_recall = (
+            np.mean(y_pred_binary[true_pattern_mask] == y_true_binary[true_pattern_mask])
+            if np.sum(true_pattern_mask) > 0 else 0.0
         )
 
-        # Maximum drawdown
-        cumulative = np.cumprod(1 + strategy_returns)
-        running_max = np.maximum.accumulate(cumulative)
-        drawdown = (cumulative - running_max) / running_max
-        max_drawdown = np.min(drawdown)
-
-        # Win rate
-        win_rate = np.mean(strategy_returns > 0)
-
         return {
-            "directional_accuracy": directional_accuracy,
-            "correlation": correlation,
-            "sharpe_ratio": sharpe_ratio,
-            "max_drawdown": max_drawdown,
-            "win_rate": win_rate,
+            "pattern_detection_accuracy": pattern_detection_accuracy,
+            "correlation": pattern_confidence_corr,
+            "pattern_precision": pattern_precision,
+            "pattern_recall": pattern_recall,
             "mae": np.mean(np.abs(y_true - y_pred)),
             "rmse": np.sqrt(np.mean((y_true - y_pred) ** 2)),
         }
@@ -189,7 +193,7 @@ class LSTMBaselineValidator:
     def _aggregate_results(self, fold_results: list) -> Dict[str, float]:
         """Aggregate metrics across folds"""
 
-        metrics = ["directional_accuracy", "correlation", "sharpe_ratio", "max_drawdown", "win_rate", "mae", "rmse"]
+        metrics = ["pattern_detection_accuracy", "correlation", "pattern_precision", "pattern_recall", "mae", "rmse"]
 
         aggregated = {}
         for metric in metrics:
@@ -232,8 +236,8 @@ class LSTMBaselineValidator:
                 "PROCEED to ensemble integration" if ready_for_ensemble else "IMPROVE model before integration"
             ),
             "key_metrics_summary": {
-                "directional_accuracy": f"{results['directional_accuracy_mean']:.3f} ± {results['directional_accuracy_std']:.3f}",
-                "sharpe_ratio": f"{results['sharpe_ratio_mean']:.3f} ± {results['sharpe_ratio_std']:.3f}",
+                "pattern_detection_accuracy": f"{results['pattern_detection_accuracy_mean']:.3f} ± {results['pattern_detection_accuracy_std']:.3f}",
+                "pattern_precision": f"{results['pattern_precision_mean']:.3f} ± {results['pattern_precision_std']:.3f}",
                 "correlation": f"{results['correlation_mean']:.3f} ± {results['correlation_std']:.3f}",
             },
         }
@@ -252,7 +256,7 @@ Validation Date: {validation_results['validation_date']}
 ENSEMBLE READINESS: {readiness['recommendation']}
 
 KEY METRICS:
-- Directional Accuracy: {readiness['key_metrics_summary']['directional_accuracy']}
+- Pattern Detection Accuracy: {readiness['key_metrics_summary']['pattern_detection_accuracy']}
 - Sharpe Ratio: {readiness['key_metrics_summary']['sharpe_ratio']}  
 - Correlation: {readiness['key_metrics_summary']['correlation']}
 
@@ -260,7 +264,7 @@ TARGET ASSESSMENT:
 """
 
         for metric, assessment in readiness["individual_assessments"].items():
-            status = "✓ PASS" if assessment["meets_target"] else "✗ FAIL"
+            status = "PASS" if assessment["meets_target"] else "FAIL"
             gap_text = f"({assessment['gap']:+.3f})" if assessment["gap"] != 0 else ""
             report += f"- {metric.replace('_', ' ').title()}: {assessment['actual']:.3f} vs {assessment['target']:.3f} {gap_text} {status}\n"
 
@@ -284,7 +288,7 @@ def create_test_data() -> Tuple[np.ndarray, np.ndarray, pd.DataFrame]:
 
     n_samples = 1000
     sequence_length = 30
-    n_features = 12
+    n_features = 17  # Updated to match new pattern feature count
 
     # Generate synthetic features
     features = np.random.randn(n_samples, sequence_length, n_features)

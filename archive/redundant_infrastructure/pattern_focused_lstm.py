@@ -29,7 +29,7 @@ class PatternFocusedLSTMBuilder:
         """Build pattern focused LSTM model
 
         Args:
-            input_shape: (sequence_length, n_features) - expected ~(30, 12)
+            input_shape: (sequence_length, n_features) - expected ~(30, 17) for pattern features
             **params: Model hyperparameters
 
         Returns:

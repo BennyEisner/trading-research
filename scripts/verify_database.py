@@ -30,14 +30,14 @@ def verify_database_and_data():
     logger.log(f"Checking for database at: {expected_db_path}")
     
     if not os.path.exists(expected_db_path):
-        logger.log("❌ Database file not found!")
+        logger.log("Database file not found!")
         logger.log("To create the database with data, run:")
         logger.log("  cd /Users/beneisner/financial-returns-api")
         logger.log("  source .venv/bin/activate")
         logger.log("  python -m pipeline.run")
         return False, {"error": "Database file not found", "solution": "Run pipeline.run to populate database"}
     
-    logger.log(f"✅ Database found at: {expected_db_path}")
+    logger.log(f"Database found at: {expected_db_path}")
     
     # Update config to point to correct database location
     config.config["database_url"] = f"sqlite:///{expected_db_path}"
@@ -47,7 +47,7 @@ def verify_database_and_data():
         # 1. Test database connection using the API models
         logger.log("Testing database connection...")
         data_loader = DataLoader(config)
-        logger.log("✅ Database connection successful")
+        logger.log("Database connection successful")
         
         # 2. Check available tickers
         tickers = config.get("tickers")
@@ -69,7 +69,7 @@ def verify_database_and_data():
                     "issues": len(issues)
                 }
                 
-                logger.log(f"✅ {ticker}: {len(data)} records, valid: {is_valid}")
+                logger.log(f"{ticker}: {len(data)} records, valid: {is_valid}")
                 if issues:
                     for issue in issues[:2]:  # Show first 2 issues
                         logger.log(f"   ⚠️  {issue}")
@@ -92,7 +92,7 @@ def verify_database_and_data():
         logger.log(f"Ready for training: {valid_tickers}")
         
         if len(valid_tickers) >= len(tickers) * 0.7:  # 70% success rate
-            logger.log("✅ DATABASE READY FOR TRAINING")
+            logger.log("DATABASE READY FOR TRAINING")
             return True, ticker_stats
         else:
             logger.log("❌ INSUFFICIENT DATA FOR TRAINING")
@@ -105,7 +105,7 @@ def verify_database_and_data():
 if __name__ == "__main__":
     success, stats = verify_database_and_data()
     if success:
-        print("✅ Database verification passed - Ready for training")
+        print("Database verification passed - Ready for training")
     else:
         print("❌ Database verification failed - Check logs")
     sys.exit(0 if success else 1)

@@ -62,6 +62,70 @@ def prepare_lstm_sequences(data: pd.DataFrame,
     return np.array(X), np.array(y)
 
 
+def prepare_swing_trading_sequences(data: pd.DataFrame,
+                                  feature_columns: List[str],
+                                  target_column: str,
+                                  sequence_length: int = 20,
+                                  prediction_horizon: int = 5,
+                                  stride: int = 5) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Prepare sequences optimized for swing trading (2-10 day holding periods)
+    
+    Args:
+        data: DataFrame with features and target
+        feature_columns: List of feature column names  
+        target_column: Target column name
+        sequence_length: 20-day sequences (vs 30-day for daily trading)
+        prediction_horizon: 5-day prediction horizon for swing trading
+        stride: 5-day stride for overlapping sequences (increases training examples)
+        
+    Returns:
+        Tuple of (X_sequences, y_targets) optimized for swing trading
+    """
+    return prepare_lstm_sequences(
+        data=data,
+        feature_columns=feature_columns,
+        target_column=target_column,
+        sequence_length=sequence_length,
+        prediction_horizon=prediction_horizon,
+        stride=stride
+    )
+
+
+def validate_sequence_overlap(sequence_length: int, stride: int, total_samples: int) -> Dict[str, int]:
+    """
+    Validate swing trading sequence parameters and calculate overlap statistics
+    
+    Args:
+        sequence_length: Length of each sequence
+        stride: Step size between sequences  
+        total_samples: Total number of data points available
+        
+    Returns:
+        Dictionary with overlap statistics
+    """
+    
+    # Calculate number of sequences that can be created
+    n_sequences = max(0, (total_samples - sequence_length) // stride + 1)
+    
+    # Calculate overlap percentage
+    overlap_length = sequence_length - stride
+    overlap_percentage = (overlap_length / sequence_length) * 100 if sequence_length > 0 else 0
+    
+    # Calculate total training examples vs original data points
+    training_multiplier = n_sequences / max(1, total_samples - sequence_length + 1)
+    
+    return {
+        'n_sequences': n_sequences,
+        'overlap_length': overlap_length,
+        'overlap_percentage': overlap_percentage,
+        'training_multiplier': training_multiplier,
+        'total_samples': total_samples,
+        'sequence_length': sequence_length,
+        'stride': stride
+    }
+
+
 def create_time_series_splits(data: pd.DataFrame,
                              n_splits: int = 5,
                              test_size_ratio: float = 0.2) -> List[Tuple[np.ndarray, np.ndarray]]:

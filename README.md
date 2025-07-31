@@ -1,62 +1,63 @@
-# Trading Research
+# Financial Pattern Detection API
 
 ## Project Focus
 
-**Goal**: Generate consistent alpha through improved ML models and risk management  
-**Target**: 52-55% win rate with Sharpe ratio >1.0  
-**Approach**: Cross-sectional ranking, multi-timeframe ensembles, and regime awareness
+**Goal**: Ensemble Trading System with LSTM Pattern Verification for swing trading (2-10 day holding periods)  
+**Target**: >55% pattern detection accuracy with meta-labeling for technical indicator signal filtering  
+**Approach**: Technical Indicators (RSI, MACD) + LSTM Pattern Verification → Ensemble Signal Integration
 
 ## Architecture
 
 ```
-ML Alpha Generation System
-├── PostgreSQL + TimescaleDB    # Time-series optimized data storage
-├── FastAPI                     # Model serving API
-├── Multi-Strategy Models       # Cross-sectional, multi-timeframe, regime-aware
-├── Ensemble Strategy Framework # Refactored pipeline orchestration
-├── Walk-Forward Backtesting    # Performance validation
-├── Risk Management             # Position sizing
-└── Docker Deployment           # Containerized setup
+Ensemble Trading System with LSTM Pattern Verification
+├── Technical Indicator Strategies
+│   ├── RSI Mean Reversion Strategy
+│   ├── MACD Momentum Strategy
+│   └── Future Strategies (4-5 total planned)
+├── LSTM Pattern Verification Engine
+│   ├── 17 Pattern Features        # Specialized pattern detection
+│   ├── Shared Backbone LSTM       # Pattern verification (~100-400k params)
+│   ├── Multi-Ticker Training      # 27 related securities
+│   └── Meta-Labeling Framework    # Filter low confidence technical signals
+├── Ensemble Signal Integration
+│   ├── Strategy Signal Combination
+│   ├── LSTM Pattern Confidence Filtering
+│   └── Position Sizing & Risk Management
+├── FastAPI Serving                # Unified API endpoints
+└── Docker Deployment              # Containerized setup
 ```
 
 ## Directory Structure
 
 ```
+├── Ensemble Strategy System
+│   ├── src/strategies/         # Technical indicator strategies
+│   │   ├── implementations/    # RSI, MACD strategy implementations
+│   │   ├── ensemble.py         # Strategy combination and weighting
+│   │   ├── base.py            # Base strategy framework
+│   │   └── validation/        # Strategy specific validation
+│   ├── src/pipeline/          # Ensemble orchestration
+│   └── src/backtesting/       # Walk-forward testing framework
+│
+├── LSTM Pattern Verification Engine
+│   ├── src/features/           # 17 pattern features system
+│   │   ├── pattern_feature_calculator.py
+│   │   ├── multi_ticker_engine.py         # Multi-ticker processing
+│   │   ├── processors/pattern_features_processor.py  # Processor integration
+│   │   └── utils/              # Pattern validation utilities
+│   ├── src/models/             # LSTM architecture
+│   │   ├── shared_backbone_lstm.py        # Pattern verification specialist
+│   │   └── lstm_baseline.py               # Pattern detection validation
+│   ├── src/training/           # Training infrastructure
+│   │   ├── shared_backbone_trainer.py     # multiticker trainer
+│   │   └── pattern_target_generator.py    # Pattern validation targets
+│   └── src/validation/         # Robust validation framework
+│
 ├── Infrastructure
-│   ├── config/             # YAML configuration
-│   ├── database/           # PostgreSQL + TimescaleDB schema
-│   ├── ml_api/             # FastAPI model serving
-│   ├── docker-compose.yml # Single machine deployment
-│   └── Dockerfile         # Python API container
-│
-├── Pipeline Orchestration
-│   ├── pipeline/          # Refactored pipeline components
-│   │   ├── orchestration/     # Thin pipeline orchestration (EnsembleDataPipeline)
-│   │   ├── coordination/      # Ensemble coordination with graceful degradation
-│   │   ├── historical/        # Historical data integration
-│   │   └── backtesting/       # Enhanced backtesting framework
-│
-├── Business Logic
-│   ├── strategies/        # strategy implementations
-│   │   ├── core/             # Strategy compatibility checker
-│   │   ├── implementations/   # RSI, MACD and other strategy implementations
-│   │   ├── adapters/         # ENsure coordination and quality checks
-│   │   ├── validation/       # Strategy-specific validation
-│   │   └── ensemble.py       # Ensemble manager for signal combination
-│   ├── backtesting/       # Walk-forward testing framework
-│   │   ├── results/       # Performance data
-│   │   └── reports/       # Analysis outputs
-│   └── models/           # Trained model storage
-│       ├── trained/      # Production models
-│       └── checkpoints/  # Training snapshots
-│
-├── ML Pipeline
-│   ├── src/
-│   │   ├── data/
-│   │   ├── features/
-│   │   ├── models/
-│   │   └── utils/
-│   └── scripts/
+│   ├── config/             # System configuration
+│   ├── ml_api/             # FastAPI unified serving
+│   ├── docker-compose.yml # Deployment setup
+│   └── archive/            # Archived legacy code (1200+ lines removed)
 │
 └── Documentation
     └── docs/
@@ -64,277 +65,218 @@ ML Alpha Generation System
 
 ## Current System Status
 
-### **(Working Foundation**
+### **Completed Foundation**
 
-- **Zero Temporal Loss**: 17,998 training samples
-- **Multi-Scale LSTM**: 3.2M parameters with attention mechanisms
-- **Advanced Features**: 149 candidates → 24 optimally selected
-- **Bias Fixes Applied**: StandardScaler, fillna fixes, removed artificial negative bias
-- **Production Pipeline**: 5-stage separation of concerns
-- **Performance**: ~ 57% directional accuracy (no magnitude support, combined weekly + daily)
-- **Refactored Strategy System**: Clean pipeline orchestration with focused components
+**Technical Indicator Strategies**:
 
-### **Completed Infrastructure**
+- **RSI Mean Reversion Strategy**: Oversold/overbought signal generation with dynamic thresholds
+- **MACD Momentum Strategy**: Crossover detection with histogram confirmation
+- **Ensemble Framework**: Strategy combination, weighting, and signal integration
 
-- **Refactored Pipeline Architecture**: focused components
-- **Strategy Compatibility Checker**: Robust requirement validation
-- **Ensemble Coordinator**: Graceful degradation management
-- **Simplified Data Adapter**: Pure data formatting without validation chains
-- **API Framework**: FastAPI with model serving endpoints
-- **Database**: PostgreSQL + TimescaleDB time-series optimization
+**LSTM Pattern Verification Engine**:
 
-### **In Development (Phase 2)**
+- **17 Pattern Features**: Momentum persistence, volatility regimes, trend exhaustion, volume divergences
+- **Shared Backbone LSTM**: ~400k parameters, enhanced regularization, pattern verification specialist
+- **Multi-Ticker Training**: 27 expanded universe securities → MAG7 specialization
+- **Pattern Target Generation**: Binary pattern validation (not return prediction)
+- **Overlapping Sequences**: 20-day lookback, 5-day stride for swing trading optimization
+- **Clean Architecture**: 1,200+ lines of legacy code archived
 
-- **Historical Data Integration**: Enhanced backtesting with refactored components
-- **Multi-Strategy Models**: Cross-sectional, multi-timeframe, regime-aware
-- **Component-Aware Metrics**: Performance attribution and degradation analysis
-- **Enhanced Validation**: Historical validation with bootstrap significance testing
-- **Risk Management**: Position sizing, drawdown controls
+### **Ready for Implementation**
 
-## Potential Alpha Generation Strategies
+**Ensemble Integration**:
 
-### 1. Cross-Sectional Ranking
+- **Technical Indicator Signal Generation**: RSI + MACD primary signals ready
+- **LSTM Pattern Confidence Scoring**: Pattern verification for signal filtering
+- **Ensemble Signal Combination**: Weighted integration with meta-labeling
 
-**Approach**: Predict relative performance within sectors or market cap cohorts  
-**Edge**: Remove market-wide noise + daily noise, focus on stock specific alpha  
-**Implementation**: Long top 20%, short bottom 20% based on rankings  
-**Expected**: 50-53% accuracy through sector neutral predictions
+**LSTM Pattern Verification**:
 
-### 2. Multi-Timeframe Ensemble
+- **Pattern Detection Training**: Shared backbone trainer with pattern targets
+- **Enhanced Regularization**: Dropout 0.45, L2 0.006, batch normalization
+- **Robust Validation**: Bootstrap statistical testing, cross-ticker validation
+- **Multi-Ticker Engine**: Parallel processing for expanded universe training efficenccy
+- **API Framework**: FastAPI serving infrastructure
 
-**Approach**: Combine 1, 3, 5, 10-day predictions with different weights  
-**Edge**: Capture momentum (short-term) and mean reversion (longer-term)  
-**Implementation**: Sharpe ratio-weighted ensemble with correlation adjustment  
-**Expected**: 50-53% accuracy through signal diversification
+### **Next Phase (Ensemble + Meta-Labeling Integration)**
 
-### 3. Regime-Aware Models
+**Ensemble Integration**:
 
-**Approach**: Different models for different market conditions  
-**Edge**: Adapt to changing market dynamics (volatility, correlation regimes)  
-**Implementation**: HMM regime detection to dynamic model switching  
-**Goal**: 52-55+% consistent accuracy through adaptive modeling
+- **LSTM-Strategy Integration**: Connect pattern confidence to RSI/MACD signal filtering
+- **Meta-Labeling Implementation**: Filter low-confidence technical indicator signals
+- **Additional Technical Strategies**: Expand to 4-5 total technical indicator strategies
 
-## Current Model Architecture Deep Dive
+**Advanced LSTM Features**:
 
-### Multi-Scale LSTM
+- **Multi-Task LSTM**: Pattern confidence, direction, position sizing heads
+- **MAG7 Specialization**: Transfer learning from expanded universe
+- **Production Integration**: Walk-forward validation, ensemble coordination
 
-## Future Performance Targets & Validation
+## Ensemble Strategy Approach
 
-### **Accuracy Targets**
+### 1. Technical Indicator Primary Signals
 
-- **Baseline**: 50-53% (random/market efficiency)
-- **Cross-sectional**: 50-53% (sector-neutral edge)
-- **Multi-timeframe**: 50-54% (signal diversification)
-- **Regime-aware**: 50-55% (adaptive modeling)
-- **Combined**: 55%+ (ensemble strategies)
+**Philosophy**: RSI and MACD strategies generate primary trading signals based on proven technical analysis  
+**Implementation**: RSI mean reversion + MACD momentum crossover strategies  
+**Integration**: Ensemble framework combines and weights multiple technical strategies  
+**Expansion**: Plans for 4-5 total technical indicator strategies
 
-### **Risk-Adjusted Returns**
+### 2. LSTM Pattern Verification & Meta-Labeling
 
-- **Sharpe Ratio**: >1.0
-- **Max Drawdown**: <15% (with dynamic position sizing)
-- **Calmar Ratio**: >0.8 (return/max drawdown)
-- **Volatility Target**: 10-12% annualized
+**Philosophy**: LSTM as pattern verification specialist, not competing signal generator  
+**Core Question**: "When technical indicators signal, are the underlying patterns actually valid?"  
+**Implementation**: LSTM provides pattern confidence scores to filter technical indicator signals  
+**Edge**: Reduce false signals by identifying when NOT to trade based on pattern confidence  
+**Target**: >55% pattern detection accuracy for filtering low-confidence technical signals
 
-### **Backtesting Framework**
+### 3. Ensemble Signal Integration
 
-- **Method**: Walk-forward analysis with 252-day training windows
-- **Rebalancing**: Weekly (5-day frequency)
-- **Transaction Costs**: 10 bps round-trip (for realistic simulation)
-- **Position Limits**: 1-10% per position
-- **Out of Sample**: Temporal separation
+**Approach**: Technical indicators generate signals → LSTM provides pattern confidence → Ensemble combines  
+**Signal Flow**: RSI/MACD signals → Pattern confidence filtering → Position sizing → Final trading decision  
+**Implementation**: EnsembleManager coordinates multiple strategies with LSTM meta-labeling  
+**Expected**: Improved signal quality through confidence-based filtering of technical indicator signals
+
+## System Architecture
+
+### **Technical Indicator Strategies**
+
+**RSI Mean Reversion Strategy**:
+
+- **Logic**: Long when RSI < 30 (oversold), Short when RSI > 70 (overbought)
+- **Exit Conditions**: Return to neutral zone (40-60), opposite signals
+- **Signal Strength**: Based on RSI extremity with volatility adjustment
+
+**MACD Momentum Strategy**:
+
+- **Logic**: Long on bullish crossover (MACD > Signal), Short on bearish crossover
+- **Confirmation**: Histogram momentum confirmation, divergence detection
+- **Signal Strength**: Based on histogram magnitude with volatility adjustment
+
+**Ensemble Framework**:
+
+- **Signal Combination**: Weighted average, voting, or confidence-weighted methods
+- **Position Sizing**: Signal strength based, equal weight, or volatility adjusted
+- **Risk Management**: Maximum position limits, correlation monitoring
+
+### **LSTM Pattern Verification Engine**
+
+**17 Pattern Features**:
+
+- **Non-linear Price Patterns**: Price acceleration, volume-price divergence, volatility regime changes
+- **Temporal Dependencies**: Momentum persistence, volatility clustering, trend exhaustion, GARCH forecasting
+- **Market Microstructure**: Intraday range expansion, overnight gaps, end-of-day momentum
+- **Cross-asset Relationships**: Sector relative strength, market beta instability, VIX term structure
+- **Core Context**: Multi-timeframe returns, normalized volume, price levels
+
+**Shared Backbone LSTM**:
+
+- **Architecture**: 2-layer LSTM (64→32 units) + Dense(16) → Pattern confidence output
+- **Parameters**: ~400k (reduced from 3.2M to prevent overfitting)
+- **Regularization**: Dropout 0.45, L2 0.006, batch normalization, gradient clipping
+- **Training**: 27 expanded universe → MAG7 specialization transfer learning
+- **Output**: Pattern confidence scores (0-1) for technical signal meta-labeling
+
+**Pattern Validation Framework**:
+
+- **Targets**: Binary pattern resolution validation (not return prediction)
+- **Validation**: Bootstrap statistical testing, cross-ticker validation
+- **Success Criteria**: >55% pattern detection accuracy + >0.3 correlation with resolution
+- **Time Horizons**: 3, 5, 10, 15-day pattern resolution validation
 
 ## Development Workflow
 
-### **Research Phase**
+### **Ensemble Strategy Pipeline**
 
-1. **Feature Engineering**: Test new indicators in `src/features/`
-2. **Model Architecture**: Experiment with new models in `src/models/`
+1. **Data Loading**: Multi-ticker OHLCV data with technical indicators
+2. **Technical Signal Generation**: RSI and MACD strategies generate primary signals
+3. **Pattern Feature Calculation**: 17 pattern features via `PatternFeatureCalculator`
+4. **Pattern Confidence Scoring**: LSTM provides confidence scores for technical signals
+5. **Ensemble Integration**: Combine technical signals with pattern confidence filtering
+6. **Validation**: Strategy performance + pattern detection accuracy
 
-### **Implementation Phase**
+### **Implementation Steps**
 
-1. **Strategy Development**: Add to `strategies/{strategy_name}/`
-2. **Backtesting**: Validate with `backtesting/` and `src/validation/` framework
-3. **API Integration**: Add endpoints to `ml_api/routes/`
+**Strategy Development**:
 
-### **Deployment Phase**
+1. **Strategy Implementation**: Add strategies to `src/strategies/implementations/`
+2. **Ensemble Integration**: Register strategies with `EnsembleManager`
+3. **Strategy Validation**: Use `src/strategies/validation/` framework
 
-1. **Configuration**: Update `config/production.yaml`
-2. **Docker Build**: `docker build -t trading-api .`
-3. **Deploy**: `docker-compose up -d`
+**LSTM Pattern Verification**:
 
-### **Data Pipeline**
+1. **Feature Development**: Add patterns to `src/features/pattern_feature_calculator.py`
+2. **Model Training**: Use `src/training/shared_backbone_trainer.py`
+3. **Pattern Validation**: Pattern-specific validation with `src/validation/` framework
+4. **Integration**: Connect pattern confidence to ensemble signal filtering
 
-- **ETL Pipeline**: Automated data fetching, transformation, and loading from financial APIs
-- **Database**: SQLite with SQLAlchemy ORM for data storage and retrieval
+**API Integration**: Serve unified ensemble + pattern verification via FastAPI
 
-### **API Layer**
+### **Deployment**
 
-- **FastAPI**: RESTful API for data access and model predictions
-- **Endpoints**: Price data retrieval, ticker management, portfolio formulation, and prediction services
-- **Frontend**: Next.js/React.js interface for data visualization and model interaction
-
-### **Machine Learning Framework (in transition period)**
-
-- **Feature Engineering**:
-  - Price momentum and volatility metrics
-  - Moving averages and Bollinger Bands
-  - Volume analysis and market efficiency indicators
-  - Support/resistance levels and trend strength
-- **Model Architectures**:
-  - Multi-branch LSTM with attention mechanisms
-  - Convolutional feature extraction
-  - Ensemble methods with cross-validation
+1. **Configuration**: Ensemble + pattern detection settings in `config/config.py`
+2. **Training**: Multi-ticker pattern training + strategy backtesting
+3. **Serving**: Unified ensemble strategy + pattern confidence API endpoints
+4. **Monitoring**: Strategy performance + pattern detection accuracy tracking
 
 ---
 
-## Key Features
+## Current Development Status
 
-### **Advanced Feature Engineering**
+### **Phase 0: Architecture Refactoring (COMPLETED)**
 
-- **Technical Indicators**: RSI, MACD, Bollinger Bands, Stochastic Oscillator
-- **Market Microstructure**: Gap analysis, price position within daily range
-- **Volatility Metrics**: GARCH, Multi-timeframe volatility ratios and regime detection
-- **Volume Analysis**: On-balance volume, volume-price trend correlation
-- **Statistical Features**: Returns skewness, kurtosis, and autocorrelation
+- **Comprehensive Codebase Audit**: Identified and archived 1,200+ lines of conflicting legacy code
+- **Legacy Feature Engineering Removed**: 149-feature system → 17 pattern features
+- **Directional Accuracy Eliminated**: Replaced with pattern detection accuracy throughout
+- **Complex Models Archived**: Multi-scale LSTM (3.2M params) → Shared backbone (400k params)
+- **Clean Pattern Focus**: All components aligned with pattern detection specialist approach
 
-### **Neural Network**
+### **Phase 1: Pattern Detection Implementation (READY)**
 
-- **Multi-Head Attention**: Captures temporal dependencies
-- **Hybrid Architecture**: Combines LSTM, GRU, and CNN componentularization\*\*: Layer normalization, dropout, and L2 regularization
-- **Note**: Currently refactoring LSTM architecture in order to simplify and reduce paramater count to help with overfitting
+- **Foundation Complete**: Pattern features, shared backbone LSTM, training infrastructure
+- **Target System Ready**: Pattern validation targets (not return prediction)
+- **Multi-Ticker Training**: Expanded universe approach for overfitting prevention
+- **Enhanced Regularization**: Dropout 0.45, L2 0.006, batch normalization
 
-### **Production Considerations**
+### **Phase 2: Multi-Task Architecture (NEXT)**
 
-- **Monitoring**: Comprehensive logging and performance tracking
-- **Error Handling**: data validation and easy failure recovery
-- **Configuration Management**: Centralized configuration system
+- **Multi-Task LSTM**: Pattern confidence, direction, position sizing heads
+- **Meta-Labeling**: Signal filtering for low-confidence patterns
+- **MAG7 Specialization**: Transfer learning from expanded universe to MAG7
+- **Production Integration**: Walk-forward validation, API endpoints
 
----
+### **Success Criteria**
 
-## Current Development Focus
-
-### **Phase 1: Code Refactoring & Cleanup**
-
-**Status**: **Completed**
-
-- **Infrastructure Migration**: ML components moved from `ml/` to root level
-- **Dependency Updates**: Python 3.12, latest package versions, removed legacy code
-- **Clean Architecture**: Separated concerns, removed redundant files and old logs
-- **Code Quality**: Standardizing imports, fixing deprecated patterns
-- **Documentation**: API completion, proper type hints, docstring standardization
-- **Strategy System Refactoring**: Complete pipeline orchestration refactor with focused components
-
-### **Phase 2: Historical Data Integration (Current Priority)**
-
-**Status**: **In Progress**
-
-- **Historical Pipeline Integration**: Connect refactored components with existing DataLoader and TimescaleDB
-- **Enhanced Backtesting Framework**: EnsembleBacktestRunner with component-aware metrics
-- **Focused Validation Integration**: StrategyCompatibilityChecker and EnsembleCoordinator with historical validation
-- **Component Attribution**: Performance analysis with focused component insights
-- **API Enhancement**: FastAPI routes for ensemble strategy endpoints
-- **Testing Framework**: Comprehensive integration tests for refactored architecture
-
-### **Phase 3: Portfolio Management & Trading (Long-term)**
-
-**Status**: **Planned**
-
-- **Strategy Implementation**: Cross-sectional ranking, multi-timeframe ensembles
-- **Backtesting Framework**: Walk-forward analysis with realistic transaction costs
-- **Risk Management**: Position sizing, drawdown controls, correlation limits
-- **Performance Monitoring**: Real-time tracking, automated rebalancing
-- **Production Trading**: Paper trading → live implementation
+**Phase 1**: >55% pattern detection accuracy per pattern type
+**Phase 2**: Multi-task architecture with meta-labeling operational
+**Phase 3**: MAG7 specialization with production-ready API
 
 ---
 
-### **Immediate Next Steps (Priority Order)**
+## Key Technical Decisions
 
-1. **Historical Pipeline Adapter** (`src/pipeline/historical/`) - integrate refactored components with existing DataLoader
-2. **Pattern Focused LSTM** integrated into ensemble strategy
-3. **Voting based confidence** to use technical analysis in paralell to LSTM pattern recognition
-4. **Enhanced Backtesting Runner** (`src/pipeline/backtesting/`) - component-aware performance metrics
-5. **Focused Validation Pipeline** (`src/validation/historical_validation_pipeline.py`) - no validation chains
-6. **Integration Testing** - comprehensive tests for refactored architecture with historical data
-7. **API Enhancement** - ensemble strategy endpoints with component attribution
+### **Pattern Detection Philosophy**
 
-### **Success Metrics by Phase**
+- **Not Return Prediction**: LSTM validates patterns, doesn't compete with signals
+- **Meta-Labeling Focus**: Identify when NOT to trade (low confidence patterns)
+- **Pattern Specialization**: Separate accuracy for momentum, volatility, trend, volume patterns
 
-**Phase 1 (Refactoring)**: **Completed**
+### **Architecture Choices**
 
-- Clean, maintainable codebase
-- Refactored strategy system with focused components
-- Pipeline orchestration with 10-line execute method
-- No validation chains - direct component ownership
+**Technical Strategies**:
 
-**Phase 2 (Historical Integration)**: **In Progress**
+- **Proven Indicators**: RSI and MACD provide reliable primary signals
+- **Ensemble Framework**: Flexible combination of multiple technical strategies
+- **Signal Strength Weighting**: Dynamic weighting based on strategy confidence
 
-- Historical pipeline adapter functional
-- Component-aware backtesting operational
-- Enhanced validation with bootstrap significance testing
-- Performance attribution with graceful degradation analysis
+**LSTM Pattern Verification**:
 
-**Phase 3 (Production Trading)**: **Planned**
+- **Small Model**: 400k parameters to prevent overfitting (vs. 3.2M legacy)
+- **Enhanced Regularization**: Aggressive dropout/L2 for expanded universe training
+- **Shared Backbone**: Cross-stock pattern learning with stock-specific adaptation
+- **Meta-Labeling Focus**: Pattern confidence for filtering rather than not competing signals
 
-- Multi-strategy models (cross-sectional, multi-timeframe, regime-aware)
-- 52-55% directional accuracy achieved
-- Sharpe ratio >1.0 with ensemble approach
-- Component-specific risk management
+### **Training Strategy**
 
-## Refactored Ensemble Strategy System
-
-### **Key Improvements**
-
-- **No Validation Chains**: Direct PipelineValidator ownership eliminates confusion
-- **Focused Components**: Each component has single, clear responsibility
-- **Enhanced Testability**: Components can be tested in isolation
-- **Graceful Degradation**: EnsembleCoordinator handles strategy failures elegantly
-
-### **Component Responsibilities**
-
-**Pipeline Orchestration** (`src/pipeline/orchestration/ensemble_data_pipeline.py`):
-
-- Coordinates 5 focused execution stages
-- Direct PipelineValidator ownership
-- Centralized error handling and results packaging
-
-**Strategy Compatibility Checker** (`src/strategies/core/compatibility_checker.py`):
-
-- Validates data against strategy requirements
-- Feature quality checks (NaN ratios, RSI ranges, ATR positivity)
-- Fallback feature mapping
-
-**Ensemble Coordinator** (`src/pipeline/coordination/ensemble_coordinator.py`):
-
-- Multi-strategy ensemble logic with graceful degradation
-- Strategy validation coordination
-- Comprehensive failure reporting
-
-**Simplified Data Adapter** (`src/strategies/adapters/data_adapter.py`):
-
-- Pure data formatting and cleaning
-- Feature fallback application
-- Removed validation and ensemble logic (moved to focused components)
-
-### **Testing and Validation**
-
-**Test Suite**:
-
-- Unit tests for each focused component
-- Integration tests for end-to-end pipeline execution
-- Component isolation testing for maintainability
-- Performance benchmarking of refactored architecture
-
-**Validation Framework Integration**:
-
-- Direct PipelineValidator usage (no chains)
-- Strategy-specific validation with StrategyCompatibilityChecker
-- Ensemble robustness testing with EnsembleCoordinator
-- Integration with existing GappedTimeSeriesCV and bootstrap methods
-
-**Ongoing**:
-
-- Type hint standardization across codebase
-- Docstring completion
-- Import optimization and dependency cleanup
-- Phase 2 historical data integration with refactored architecture
-- non linear pattern recognition LSTM creation
+- **Expanded Universe**: 27 securities for training → MAG7 for specialization
+- **Overlapping Sequences**: 20-day lookback, 5-day stride for swing trading
+- **Pattern Targets**: Binary validation not returns
