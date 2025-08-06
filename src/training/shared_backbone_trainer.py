@@ -16,13 +16,13 @@ import tensorflow as tf
 sys.path.append(str(Path(__file__).parent.parent))
 
 from config.config import get_config
-from models.shared_backbone_lstm import SharedBackboneLSTMBuilder
-from features.multi_ticker_engine import MultiTickerPatternEngine
-from features.utils.lstm_utils import prepare_swing_trading_sequences, validate_sequence_overlap
-from validation.pipeline_validator import PipelineValidator
-from validation.robust_time_series_validator import RobustTimeSeriesValidator
-from validation.gapped_time_series_cv import GappedTimeSeriesCV
-from training.pattern_target_generator import PatternTargetGenerator
+from ..models.shared_backbone_lstm import SharedBackboneLSTMBuilder
+from ..features.multi_ticker_engine import MultiTickerPatternEngine
+from ..features.utils.lstm_utils import prepare_swing_trading_sequences, validate_sequence_overlap
+from ..validation.pipeline_validator import PipelineValidator
+from ..validation.robust_time_series_validator import RobustTimeSeriesValidator
+from ..validation.gapped_time_series_cv import GappedTimeSeriesCV
+from .pattern_target_generator import PatternTargetGenerator
 
 
 class SharedBackboneTrainer:
