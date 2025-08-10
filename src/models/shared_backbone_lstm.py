@@ -101,10 +101,10 @@ class SharedBackboneLSTMBuilder:
         
         x = layers.Dropout(dropout_rate * 0.8, name="shared_dropout_2")(x)
         
-        # Final prediction layer with stronger regularization
+        # Final prediction layer with sigmoid activation for (0,1) targets
         output = layers.Dense(
             1, 
-            activation="tanh", 
+            activation="sigmoid",  # FIXED: sigmoid for (0,1) range targets
             name="pattern_prediction",
             kernel_initializer="glorot_uniform",  # Better initialization
             bias_initializer="zeros",
@@ -114,18 +114,55 @@ class SharedBackboneLSTMBuilder:
         
         model = keras.Model(inputs=main_input, outputs=output, name="SharedBackboneLSTM")
         
-        # Enhanced optimizer with gradient clipping
+        # Enhanced optimizer with higher learning rate for pattern learning
+        # Increased from 0.0008 to help escape local minimum with constant predictions
         optimizer = tf.keras.optimizers.Adam(
-            learning_rate=params.get("learning_rate", 0.0008),  # Slightly reduced for stability
+            learning_rate=params.get("learning_rate", 0.002),  # INCREASED: Higher LR for pattern learning
             beta_1=0.9,
             beta_2=0.999,
             epsilon=1e-7,
-            clipnorm=0.8  # Tighter gradient clipping
+            clipnorm=1.0  # Slightly relaxed gradient clipping
         )
+        
+        # CORRELATION-FOCUSED LOSS FUNCTION - PRODUCTION FIX
+        def correlation_optimized_loss(y_true, y_pred):
+            """
+            FIXED: Direct correlation optimization loss function
+            
+            ROOT CAUSE RESOLUTION: MSE loss encouraged constant predictions because 
+            constant predictions minimize MSE when target variance is modest.
+            
+            SOLUTION: Directly optimize correlation instead of MSE.
+            """
+            # PRIMARY: Direct correlation maximization 
+            y_true_centered = y_true - tf.reduce_mean(y_true)
+            y_pred_centered = y_pred - tf.reduce_mean(y_pred)
+            
+            numerator = tf.reduce_sum(y_true_centered * y_pred_centered)
+            denominator = tf.sqrt(tf.reduce_sum(tf.square(y_true_centered)) * tf.reduce_sum(tf.square(y_pred_centered)))
+            
+            correlation = tf.cond(
+                tf.equal(denominator, 0.0),
+                lambda: 0.0,
+                lambda: numerator / denominator
+            )
+            
+            # SECONDARY: Prevent constant predictions with variance penalty
+            pred_variance = tf.math.reduce_variance(y_pred)
+            target_variance = tf.math.reduce_variance(y_true)
+            min_desired_variance = target_variance * 0.1  # 10% of target variance minimum
+            variance_penalty = tf.maximum(0.0, min_desired_variance - pred_variance)
+            
+            # TERTIARY: Small MSE component for numerical stability
+            mse_component = tf.reduce_mean(tf.square(y_true - y_pred))
+            
+            # Combined loss: maximize correlation + prevent constants + stability
+            # Weights: correlation (primary), variance penalty (5x), MSE (0.01x)
+            return -correlation + 5.0 * variance_penalty + 0.01 * mse_component
         
         model.compile(
             optimizer=optimizer,
-            loss="mse",
+            loss=correlation_optimized_loss,  # FIXED: Direct correlation optimization
             metrics=["mae", self._pattern_detection_accuracy, self._correlation_metric]
         )
         
@@ -176,7 +213,7 @@ class SharedBackboneLSTMBuilder:
         # Stock-specific prediction head
         output = layers.Dense(
             1,
-            activation="tanh",
+            activation="sigmoid",  # FIXED: sigmoid for (0,1) range targets
             name=f"{stock_symbol}_prediction",
             kernel_regularizer=keras.regularizers.l2(l2_reg)
         )(x)
@@ -242,30 +279,53 @@ class SharedBackboneLSTMBuilder:
             List of Keras callbacks for regularization
         """
         
+        # Get training parameters from config
+        training_params = self.config.get("training_params", {})
+        
+        # Custom learning rate scheduler for escaping local minima
+        def cosine_restarts_schedule(epoch):
+            """Cosine annealing with warm restarts to escape local minima"""
+            base_lr = 0.002
+            min_lr = 0.0005
+            restart_period = 20  # Restart every 20 epochs
+            
+            t = epoch % restart_period
+            if t == 0:
+                return base_lr  # Restart at high learning rate
+            else:
+                # Cosine annealing
+                return min_lr + (base_lr - min_lr) * (1 + np.cos(np.pi * t / restart_period)) / 2
+        
         callbacks = [
-            # Early stopping with patience for overfitting prevention
+            # Learning rate scheduling for constant prediction escape
+            keras.callbacks.LearningRateScheduler(
+                cosine_restarts_schedule,
+                verbose=1
+            ),
+            
+            # Early stopping with patience for overfitting prevention  
             keras.callbacks.EarlyStopping(
-                monitor="val_loss",
-                patience=15,  # Increased patience for swing trading
+                monitor=training_params.get("monitor_metric", "val_loss"),
+                patience=training_params.get("patience", 25),  # Increased patience for LR restarts
                 restore_best_weights=True,
                 verbose=1,
-                mode="min"
+                mode=training_params.get("early_stopping_mode", "min")
             ),
             
-            # Reduce learning rate on plateau
+            # Reduce learning rate on plateau (backup to scheduler)
             keras.callbacks.ReduceLROnPlateau(
-                monitor="val_loss",
-                factor=0.7,  # More conservative reduction
-                patience=8,
-                min_lr=1e-6,
+                monitor="val__correlation_metric",  # Monitor correlation specifically
+                factor=0.7,
+                patience=15,
+                min_lr=1e-5,
                 verbose=1,
-                mode="min"
+                mode="max"  # Maximize correlation
             ),
             
-            # Model checkpoint for best validation performance
+            # Model checkpoint for best correlation performance
             keras.callbacks.ModelCheckpoint(
                 filepath="models/best_shared_backbone_model.keras",
-                monitor="val_correlation_metric",
+                monitor="val__correlation_metric",
                 save_best_only=True,
                 save_weights_only=False,
                 mode="max",
@@ -321,8 +381,8 @@ class SharedBackboneLSTMBuilder:
                 "gradient_clipping_0.8",
                 "activity_regularization_l1"
             ],
-            "output_activation": "tanh",
-            "output_range": "(-1, 1)",
+            "output_activation": "sigmoid", 
+            "output_range": "(0, 1)",
             "designed_for": "expanded_universe_training",
             "target_parameter_count": "~400k",
             "overfitting_prevention": "high"

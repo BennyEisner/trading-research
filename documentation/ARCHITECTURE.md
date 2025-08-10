@@ -35,7 +35,7 @@ The system is built on the idea that **technical indicator strategies generate p
 
 - **Question Focus**: When technical indicators signal, are the underlying patterns actually valid?
 - **Target Design**: Binary pattern validation instead of what are future returns
-- **Meta-Labeling**: Identify when and how much to trade to reduce false positives
+- **Meta-Labeling**: Identify when and how much to trade to reduce false positive
 - **Pattern Specialization**: Separate accuracy requirements for different pattern types
 
 ### Design Goals

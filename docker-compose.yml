@@ -1,4 +1,3 @@
-# Docker Compose for Personal Trading Research
 # Simple single-machine deployment
 version: '3.8'
 services:
@@ -73,4 +72,3 @@ volumes:
 networks:
   default:
     name: trading_network
-

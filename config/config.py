@@ -34,35 +34,64 @@ class DatabaseConfig(BaseSettings):
 class ModelConfig(BaseSettings):
     """Model training configuration"""
 
-    # Core parameters
     # MAG7 core tickers for final specialization
     mag7_tickers: List[str] = Field(default=["AAPL", "MSFT", "GOOG", "NVDA", "TSLA", "AMZN", "META"])
-    
-    # Expanded universe for training (25-30 correlated mega-caps + market indicators)
-    expanded_universe: List[str] = Field(default=[
-        # MAG7
-        "AAPL", "MSFT", "GOOG", "NVDA", "TSLA", "AMZN", "META",
-        # Correlated mega-cap tech
-        "CRM", "ADBE", "NOW", "ORCL", "NFLX", "AMD", "INTC", "CSCO", 
-        "AVGO", "TXN", "QCOM", "MU", "AMAT", "LRCX", "KLAC", "MRVL", 
-        "SNPS", "CDNS", "FTNT", "PANW", "INTU", "UBER", "ZM", "DDOG",
-        # Market indicators
-        "QQQ", "XLK", "SPY"
-    ])
-    
+
+    expanded_universe: List[str] = Field(
+        default=[
+            # MAG7
+            "AAPL",
+            "MSFT",
+            "GOOG",
+            "NVDA",
+            "TSLA",
+            "AMZN",
+            "META",
+            # Correlated mega-cap tech
+            "CRM",
+            "ADBE",
+            "NOW",
+            "ORCL",
+            "NFLX",
+            "AMD",
+            "INTC",
+            "CSCO",
+            "AVGO",
+            "TXN",
+            "QCOM",
+            "MU",
+            "AMAT",
+            "LRCX",
+            "KLAC",
+            "MRVL",
+            "SNPS",
+            "CDNS",
+            "FTNT",
+            "PANW",
+            "INTU",
+            "UBER",
+            "ZM",
+            "DDOG",
+            # Market indicators
+            "QQQ",
+            "XLK",
+            "SPY",
+        ]
+    )
+
     # Default to MAG7 for backward compatibility
     tickers: List[str] = Field(default=["AAPL", "MSFT", "GOOG", "NVDA", "TSLA", "AMZN", "META"])
-    
-    lookback_window: int = Field(default=20) 
-    sequence_stride: int = Field(default=5)  
-    prediction_horizon: int = Field(default=5)
+
+    lookback_window: int = Field(default=20)
+    sequence_stride: int = Field(default=5)
+    prediction_horizon: int = Field(default=3)  # Optimized for 1-10 day range
 
     target_features: int = Field(default=24)
     random_seed: int = Field(default=42)
 
-    model_size: str = Field(default="medium")  
+    model_size: str = Field(default="medium-large")
 
-    # Model architecture - dynamically set based on model_size
+    # Model architecture dynamically set based on model_size
     model_params: Dict[str, Any] = Field(default_factory=lambda: {})
 
     def __init__(self, **kwargs):
@@ -72,49 +101,62 @@ class ModelConfig(BaseSettings):
     def _get_model_params_for_size(self, size: str) -> Dict[str, Any]:
         """Get model parameters optimized for specific parameter count targets"""
 
-        # Enhanced regularization for expanded universe training
         base_params = {
-            "dropout_rate": 0.45, # High for combatting overfitting 
-            "l2_regularization": 0.006,  
+            "dropout_rate": 0.55,  # Higher for 95% overlap sequences
+            "l2_regularization": 0.01,  # Increased for overfitting prevention
             "directional_alpha": 0.05,
-            "use_batch_norm": True,  # Add batch normalization to combat overfitting
+            "use_batch_norm": True,  
             "use_recurrent_dropout": True,  # Add recurrent dropout
-            "learning_rate": 0.0008,  
+            "learning_rate": 0.0005,  # Conservative for high-overlap training
         }
 
-        if size == "small":  # Target: ~400K parameters for shared backbone
+        if size == "small":  # Target: < 10K parameters
             return {
                 **base_params,
-                "lstm_units_1": 64,  # Optimized for shared backbone
-                "lstm_units_2": 32, 
-                "dense_units": 16,  
-                "use_attention": False,  
-                "model_type": "shared_backbone",  # Use shared backbone architecture
-                "adaptation_units": 8,  
-                "finetune_learning_rate": 0.0002,  # Lower LR for fine-tuning
-            }
-        else:  
-            return {
-                **base_params,
-                "lstm_units_1": 64,  
-                "lstm_units_2": 32,  
-                "dense_units": 16,  
-                "use_attention": False,  
-                "model_type": "shared_backbone",  
-                "adaptation_units": 8,  
+                "lstm_units_1": 32,
+                "lstm_units_2": 16,
+                "dense_units": 8,
+                "use_attention": False,
+                "model_type": "shared_backbone",
+                "adaptation_units": 8,
                 "finetune_learning_rate": 0.0002,  
             }
+        elif size == "medium-large":  # Target: ~52K parameters for 1-day stride
+            return {
+                **base_params,
+                "lstm_units_1": 80,  # Increased capacity
+                "lstm_units_2": 40,
+                "dense_units": 20,
+                "use_attention": False,
+                "model_type": "shared_backbone",
+                "adaptation_units": 12,
+                "finetune_learning_rate": 0.0002,
+            }
+        else:  # medium (default)
+            return {
+                **base_params,
+                "lstm_units_1": 64,
+                "lstm_units_2": 32,
+                "dense_units": 16,
+                "use_attention": False,
+                "model_type": "shared_backbone",
+                "adaptation_units": 8,
+                "finetune_learning_rate": 0.0002,
+            }
 
-    # Training parameters
+    # Training parameters optimized for 95% overlap sequences
     training_params: Dict[str, Any] = Field(
         default={
-            "batch_size": 64,
-            "epochs": 100,
-            "learning_rate": 0.0005,
-            "patience": 5,  
+            "batch_size": 256,  # Large batch size for gradient stability
+            "epochs": 150,
+            "learning_rate": 0.0005,  # Conservative for high overlap
+            "patience": 15,  # Higher patience for validation monitoring
             "validation_split": 0.2,
-            "monitor_metric": "val__directional_accuracy",  
-            "early_stopping_mode": "max",
+            "monitor_metric": "val_loss",  # Focus on validation loss due to overlap
+            "early_stopping_mode": "min",  # Minimize validation loss
+            "reduce_lr_patience": 8,  # ReduceLROnPlateau patience
+            "reduce_lr_factor": 0.5,
+            "min_lr": 1e-6,
         }
     )
 
@@ -158,7 +200,6 @@ class TradingConfig(BaseSettings):
     model: ModelConfig = Field(default_factory=ModelConfig)
     backtest: BacktestConfig = Field(default_factory=BacktestConfig)
     api: APIConfig = Field(default_factory=APIConfig)
-
 
     # Global settings
     environment: str = Field(default="development")
@@ -209,4 +250,3 @@ def load_config(config_path: str = None) -> TradingConfig:
 def get_config() -> TradingConfig:
     """Get the global configuration instance"""
     return config
-

@@ -270,7 +270,7 @@ class FeatureCalculator:
         """Clean and normalize final features"""
         
         # Fill NaN values
-        features = features.fillna(method='ffill').fillna(method='bfill')
+        features = features.ffill().bfill()
         
         # Replace any remaining NaN with median values
         for col in features.columns:

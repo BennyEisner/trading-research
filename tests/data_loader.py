@@ -11,7 +11,7 @@ import pandas as pd
 import yfinance as yf
 
 
-def load_test_data(tickers: List[str], days: int = 500) -> Dict[str, pd.DataFrame]:
+def load_test_data(tickers: List[str], days: int = 3650) -> Dict[str, pd.DataFrame]:
     """
     Load test data using the same method as production pipeline
 
@@ -30,7 +30,7 @@ def load_test_data(tickers: List[str], days: int = 500) -> Dict[str, pd.DataFram
     for ticker in tickers:
         try:
             ticker_obj = yf.Ticker(ticker)
-            data = ticker_obj.history(start=start_date.isoformat(), end=end_date.isoformat())
+            data = ticker_obj.history(start=start_date.strftime('%Y-%m-%d'), end=end_date.strftime('%Y-%m-%d'))
 
             if data.empty:
                 print(f"WARNING: No data retrieved for {ticker}")

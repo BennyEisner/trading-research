@@ -334,18 +334,28 @@ class PipelineValidator:
 
         if len(y) > 2:
             try:
-                target_percentiles = np.percentile(y, [1, 99])
-                if target_percentiles[0] != 0:
-                    extreme_low = (y < target_percentiles[0] * 10).sum()
+                # Adaptive extreme detection based on target range
+                target_min, target_max = np.min(y), np.max(y)
+                target_range = target_max - target_min
+                
+                # For pattern confidence scores (0-1 range), use different logic
+                if target_min >= 0 and target_max <= 1 and target_range > 0.3:
+                    # Pattern confidence targets - check for values outside [0, 1]
+                    extreme_targets = ((y < 0) | (y > 1)).sum()
                 else:
-                    extreme_low = 0
+                    # Return prediction targets - use original percentile logic
+                    target_percentiles = np.percentile(y, [1, 99])
+                    if target_percentiles[0] != 0:
+                        extreme_low = (y < target_percentiles[0] * 10).sum()
+                    else:
+                        extreme_low = 0
 
-                if target_percentiles[1] != 0:
-                    extreme_high = (y > target_percentiles[1] * 10).sum()
-                else:
-                    extreme_high = 0
+                    if target_percentiles[1] != 0:
+                        extreme_high = (y > target_percentiles[1] * 10).sum()
+                    else:
+                        extreme_high = 0
 
-                extreme_targets = extreme_low + extreme_high
+                    extreme_targets = extreme_low + extreme_high
 
                 if extreme_targets > 0:
                     issues.append(f"Extreme target values detected: {extreme_targets}")

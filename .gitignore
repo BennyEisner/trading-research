@@ -97,7 +97,7 @@ docs/
 .AppleDouble
 .LSOverride
 
-# Thumbnails
+# Thumbneils
 ._*
 
 .DocumentRevisions-V100
@@ -132,4 +132,6 @@ src/validation/tests/.hypothesis
 archive/investigation
 production_runs/
 internal/
+lstm_training_runs/
+
 

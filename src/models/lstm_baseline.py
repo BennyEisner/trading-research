@@ -17,7 +17,6 @@ import tensorflow as tf
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import TimeSeriesSplit
 
-# Add parent directory for imports
 sys.path.append(str(Path(__file__).parent.parent))
 
 from config.config import get_config
