@@ -16,7 +16,7 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from config.config import get_config, load_config
-from tests.data_loader import load_test_data, validate_data_format
+from tests.utilities.data_loader import load_test_data, validate_data_format
 from src.training.shared_backbone_trainer import create_shared_backbone_trainer
 
 

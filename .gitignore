@@ -136,6 +136,8 @@ lstm_training_runs/
 
 codebase_analysis/
 target_analysis_results/
+test_results/
+
 
 
 

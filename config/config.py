@@ -83,8 +83,22 @@ class ModelConfig(BaseSettings):
     tickers: List[str] = Field(default=["AAPL", "MSFT", "GOOG", "NVDA", "TSLA", "AMZN", "META"])
 
     lookback_window: int = Field(default=20)
-    sequence_stride: int = Field(default=5)
+    
+    # Stride Configuration for Overlap Control
+    training_stride: int = Field(default=5)  # Training sequence stride (was hardcoded to 1)
+    validation_stride: int = Field(default=20)  # Validation sequence stride (ensures 0% overlap)
+    
     prediction_horizon: int = Field(default=3)  # Optimized for 1-10 day range
+    
+    # Out-of-Sample Testing Configuration
+    out_of_sample_enabled: bool = Field(default=True)
+    out_of_sample_gap_months: int = Field(default=6)  # 6-month gap for out-of-sample testing
+    temporal_validation_split: float = Field(default=0.8)  # 80% train, 20% validation by time
+    
+    # Enhanced Leakage Detection
+    correlation_monitoring_enabled: bool = Field(default=True)
+    early_epoch_correlation_threshold: float = Field(default=0.10)  # Alert if correlation > 10% in early epochs
+    leakage_detection_epochs: int = Field(default=3)  # Monitor first 3 epochs for leakage
 
     target_features: int = Field(default=24)
     random_seed: int = Field(default=42)
@@ -102,7 +116,7 @@ class ModelConfig(BaseSettings):
         """Get model parameters optimized for specific parameter count targets"""
 
         base_params = {
-            "dropout_rate": 0.55,  # Higher for 95% overlap sequences
+            "dropout_rate": 0.45,  # Reduced from 0.55 due to lower sequence overlap
             "l2_regularization": 0.01,  # Increased for overfitting prevention
             "directional_alpha": 0.05,
             "use_batch_norm": True,  

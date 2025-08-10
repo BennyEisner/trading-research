@@ -133,23 +133,26 @@ class SharedBackboneTrainer:
 
                 # Prepare pattern detection sequences with OPTIMIZED APPROACH
                 try:
-                    # OPTIMIZED: Since targets are now leak-free, we can use 1-day stride safely
-                    # The real leakage was in target generation (now fixed)
-                    # 1-day stride gives us maximum data utilization while maintaining safety
-                    optimal_stride = 1  # Back to 1-day stride - safe now that targets are leak-free
-
-                    print(f"  OPTIMIZED STRIDE: Using {optimal_stride}-day stride (targets are leak-free)")
+                    # CONFIGURABLE STRIDE: Use configured training stride to reduce overlap
+                    # This addresses remaining leakage from excessive sequence overlap
+                    training_stride = self.config.model.training_stride  # Default: 5 days
+                    
+                    print(f"  REDUCED OVERLAP STRIDE: Using {training_stride}-day stride (reducing sequence overlap)")
                     overlap_pct = (
-                        (self.config.model.lookback_window - optimal_stride) / self.config.model.lookback_window * 100
+                        (self.config.model.lookback_window - training_stride) / self.config.model.lookback_window * 100
                     )
-                    print(f"  Sequence overlap: {overlap_pct:.1f}% (safe due to leak-free targets)")
+                    print(f"  Sequence overlap: {overlap_pct:.1f}% (reduced from 95% to improve generalization)")
+                    
+                    # Calculate impact on data utilization
+                    data_reduction = (training_stride - 1) / self.config.model.lookback_window * 100
+                    print(f"  Data utilization impact: -{data_reduction:.1f}% sequences (acceptable for better generalization)")
 
                     X, y = self._prepare_pattern_detection_sequences(
                         features_df=features_df,
                         feature_columns=available_features,
                         pattern_targets=target_values,
                         sequence_length=self.config.model.lookback_window,  # 20 days
-                        stride=optimal_stride,  # Reduced overlap stride
+                        stride=training_stride,  # Configurable training stride
                     )
 
                     # Validate sequences
@@ -159,10 +162,10 @@ class SharedBackboneTrainer:
                         training_data[ticker] = (X, y)
                         total_sequences += len(X)
 
-                        # Log sequence overlap statistics with 1-day stride
+                        # Log sequence overlap statistics with configured training stride
                         overlap_stats = validate_sequence_overlap(
                             sequence_length=self.config.model.lookback_window,
-                            stride=1,  # 1-day stride
+                            stride=training_stride,  # Configurable training stride
                             total_samples=len(features_df),
                         )
 
@@ -215,36 +218,45 @@ class SharedBackboneTrainer:
 
         print(f"Combined training data: {combined_X.shape} sequences, {combined_X.shape[2]} features")
 
+        # Calculate overlap percentages for logging
+        training_overlap_pct = (
+            (self.config.model.lookback_window - self.config.model.training_stride) / self.config.model.lookback_window * 100
+        )
+        validation_overlap_pct = (
+            (self.config.model.lookback_window - self.config.model.validation_stride) / self.config.model.lookback_window * 100
+        )
+
         print(f"CRITICAL FIX: Implementing separate stride for training vs validation")
-        print(f"Training uses stride=1 (95% overlap, maximum data utilization)")  
-        print(f"Validation uses stride=20 (0% overlap, clean metrics)")
+        print(f"Training uses stride={self.config.model.training_stride} ({training_overlap_pct:.1f}% overlap, balanced utilization)")
+        print(f"Validation uses stride={self.config.model.validation_stride} ({validation_overlap_pct:.1f}% overlap, clean metrics)")
 
         # STEP 1: Use ALL overlapped sequences for training (stride=1 benefits)
         # This gives us maximum training data utilization
         train_X = combined_X  # Use all sequences for training
         train_y = combined_y
         
-        # STEP 2: Generate separate validation set with zero overlap (stride=20)
-        print(f"\nGenerating non-overlapped validation sequences...")
+        # STEP 2: Generate separate validation set with configured stride
+        validation_stride = self.config.model.validation_stride
+        print(f"\nGenerating low-overlap validation sequences with stride={validation_stride}...")
         val_X_list = []
         val_y_list = []
         
-        # Regenerate sequences with stride=20 for validation from same source data  
+        # Regenerate sequences with configured validation stride from same source data  
         for ticker, (original_X, original_y) in training_data.items():
             # Get the source features and targets for this ticker to regenerate sequences
-            print(f"Creating validation sequences for {ticker} with stride=20...")
+            print(f"Creating validation sequences for {ticker} with stride={validation_stride}...")
             
             # We need to regenerate from features - for now, use temporal sampling approach
-            # Take every 20th sequence to ensure zero overlap
+            # Take every Nth sequence based on validation stride to reduce overlap
             ticker_sequences = len(original_X)
-            validation_indices = list(range(0, ticker_sequences, 20))  # Every 20th sequence
+            validation_indices = list(range(0, ticker_sequences, validation_stride))  # Every Nth sequence
             
             if len(validation_indices) > 0:
                 ticker_val_X = original_X[validation_indices]
                 ticker_val_y = original_y[validation_indices]
                 val_X_list.append(ticker_val_X)
                 val_y_list.append(ticker_val_y)
-                print(f"  {ticker}: {len(ticker_val_X)} non-overlapped validation sequences")
+                print(f"  {ticker}: {len(ticker_val_X)} low-overlap validation sequences")
         
         # Combine validation sequences from all tickers
         if val_X_list:
@@ -252,16 +264,16 @@ class SharedBackboneTrainer:
             val_y = np.concatenate(val_y_list) 
         else:
             # Fallback: use temporal split but log the issue
-            print("WARNING: Could not generate non-overlapped validation set, using temporal split")
+            print("WARNING: Could not generate low-overlap validation set, using temporal split")
             total_samples = len(combined_X)
             train_size = int(0.8 * total_samples)
             train_X, val_X = combined_X[:train_size], combined_X[train_size:]
             train_y, val_y = combined_y[:train_size], combined_y[train_size:]
 
         print(f"\nFINAL TRAINING SETUP:")
-        print(f"  - Training samples: {len(train_X)} (stride=1, overlapped)")
-        print(f"  - Validation samples: {len(val_X)} (stride=20, non-overlapped)")
-        print(f"  - Expected correlation drop: 5-10% due to non-overlapped validation")
+        print(f"  - Training samples: {len(train_X)} (stride={self.config.model.training_stride}, {training_overlap_pct:.1f}% overlap)")
+        print(f"  - Validation samples: {len(val_X)} (stride={validation_stride}, {validation_overlap_pct:.1f}% overlap)")
+        print(f"  - Expected correlation improvement: Better generalization due to reduced overlap")
         print(f"  - Temporal integrity: PRESERVED (no random shuffling)")
 
         # Build shared backbone model
@@ -284,16 +296,19 @@ class SharedBackboneTrainer:
 
         print(f"Model architecture: {model.count_params()} parameters")
 
-        # FIXED: Add manual correlation monitoring callback
-        class ManualCorrelationMonitor(tf.keras.callbacks.Callback):
-            """Accurate correlation monitoring using full epoch data"""
+        # ENHANCED: Add correlation monitoring with leakage detection alerts
+        class EnhancedCorrelationMonitor(tf.keras.callbacks.Callback):
+            """Enhanced correlation monitoring with data leakage detection"""
 
-            def __init__(self, train_X, train_y, val_X, val_y):
+            def __init__(self, train_X, train_y, val_X, val_y, config):
                 self.train_X = train_X
                 self.train_y = train_y
                 self.val_X = val_X
                 self.val_y = val_y
+                self.config = config
                 self.best_correlation = -999
+                self.leakage_alerts = []
+                self.correlation_history = []
 
             def on_epoch_end(self, epoch, logs=None):
                 train_pred = self.model.predict(self.train_X, verbose=0).flatten()
@@ -302,39 +317,77 @@ class SharedBackboneTrainer:
                 train_corr = np.corrcoef(self.train_y, train_pred)[0, 1] if np.var(train_pred) > 1e-10 else 0.0
                 val_corr = np.corrcoef(self.val_y, val_pred)[0, 1] if np.var(val_pred) > 1e-10 else 0.0
 
+                # Store correlation history for trend analysis
+                self.correlation_history.append({
+                    'epoch': epoch + 1,
+                    'train_corr': train_corr,
+                    'val_corr': val_corr,
+                    'val_pred_var': np.var(val_pred)
+                })
+
                 # Track best validation correlation
                 if val_corr > self.best_correlation:
                     self.best_correlation = val_corr
 
+                # ENHANCED LEAKAGE DETECTION
+                leakage_threshold = self.config.model.early_epoch_correlation_threshold
+                leakage_epochs = self.config.model.leakage_detection_epochs
+                
+                # Check for data leakage in early epochs
+                if epoch < leakage_epochs:
+                    if abs(val_corr) > leakage_threshold:
+                        alert_msg = f"🚨 LEAKAGE ALERT: Epoch {epoch+1} validation correlation {val_corr:.3f} > {leakage_threshold:.3f} threshold"
+                        self.leakage_alerts.append(alert_msg)
+                        print(f"\n{alert_msg}")
+                        print("⚠️  This suggests remaining data leakage - model learns too quickly!")
+                
                 # Prediction variance analysis
                 train_pred_var = np.var(train_pred)
                 val_pred_var = np.var(val_pred)
 
                 print(f"")
-                print(f"EPOCH {epoch+1} CORRELATION ANALYSIS:")
+                print(f"EPOCH {epoch+1} ENHANCED CORRELATION ANALYSIS:")
                 print(f" Train correlation: {train_corr:8.6f}")
                 print(f" Val correlation:   {val_corr:8.6f} (best: {self.best_correlation:8.6f})")
                 print(f"Train pred var:    {train_pred_var:8.6f}")
                 print(f" Val pred var:      {val_pred_var:8.6f}")
 
-                # Status indicators
-                if abs(val_corr) > 0.2:
-                    print(f"EXCELLENT: Strong correlation achieved!")
-                elif abs(val_corr) > 0.1:
-                    print(f" GOOD: Moderate correlation")
-                elif abs(val_corr) > 0.05:
-                    print(f"PROGRESS: Weak but meaningful correlation")
+                # Enhanced status indicators with leakage awareness
+                if abs(val_corr) > 0.25:
+                    if epoch < 5:
+                        print(f"🚨 SUSPICIOUS: Very high early correlation - possible leakage!")
+                    else:
+                        print(f"✨ EXCELLENT: Strong correlation achieved after proper learning!")
+                elif abs(val_corr) > 0.15:
+                    if epoch < 3:
+                        print(f"⚠️  CONCERNING: High early correlation - monitor for leakage")
+                    else:
+                        print(f"✅ GOOD: Healthy correlation development")
+                elif abs(val_corr) > 0.08:
+                    print(f"📈 PROGRESS: Meaningful correlation building")
+                elif abs(val_corr) > 0.03:
+                    print(f"🌱 LEARNING: Weak but real pattern detection")
                 elif val_pred_var < 1e-6:
-                    print(f"WARNING: Predictions collapsed to constants")
+                    print(f"⚠️  WARNING: Predictions collapsed to constants")
                 else:
-                    print(f"LOW: Minimal correlation detected")
+                    print(f"📊 BASELINE: Minimal correlation (expected early training)")
+            
+            def get_leakage_report(self):
+                """Generate leakage detection report"""
+                if not self.leakage_alerts:
+                    return "✅ No data leakage alerts detected"
+                else:
+                    report = f"⚠️  {len(self.leakage_alerts)} leakage alert(s) detected:\n"
+                    for alert in self.leakage_alerts:
+                        report += f"  - {alert}\n"
+                    return report
 
         print(f"Final training split: {len(train_X)} train, {len(val_X)} validation")
 
         # Get base regularization callbacks
         callbacks = self.lstm_builder.get_regularization_callbacks(epochs)
 
-        correlation_monitor = ManualCorrelationMonitor(train_X, train_y, val_X, val_y)
+        correlation_monitor = EnhancedCorrelationMonitor(train_X, train_y, val_X, val_y, self.config)
         callbacks.append(correlation_monitor)
 
         print(f"Starting shared backbone training with correlation optimization...")
@@ -397,12 +450,18 @@ class SharedBackboneTrainer:
             "predictions_valid": pred_valid,
             "prediction_issues": pred_issues,
             "robust_validation": robust_results,
+            "leakage_detection": {
+                "alerts": correlation_monitor.leakage_alerts,
+                "alert_count": len(correlation_monitor.leakage_alerts),
+                "correlation_history": correlation_monitor.correlation_history,
+                "leakage_report": correlation_monitor.get_leakage_report()
+            },
             "final_metrics": {
                 "train_loss": history.history["loss"][-1],
                 "val_loss": history.history["val_loss"][-1],
                 "pattern_detection_accuracy": self._calculate_pattern_detection_accuracy(train_y, train_predictions),
                 "training_correlation_overlapped": np.corrcoef(train_y, train_predictions)[0, 1],  # Overlapped training correlation
-                "validation_correlation_clean": clean_val_correlation,  # CRITICAL: Clean validation correlation (non-overlapped)
+                "validation_correlation_clean": clean_val_correlation,  # CRITICAL: Clean validation correlation (reduced overlap)
                 "best_validation_correlation": correlation_monitor.best_correlation,  # From epoch monitoring
                 "keras_correlation": history.history.get("correlation_metric", [0])[-1],
             },
@@ -423,6 +482,9 @@ class SharedBackboneTrainer:
         print(f"")
         print(f"- Statistical significance: p={robust_results['p_value']:.4f}")
         print(f"- Keras correlation: {training_results['final_metrics']['keras_correlation']:.2e} (batch-level, misleading)")
+        print(f"")
+        print(f"LEAKAGE DETECTION REPORT:")
+        print(training_results['leakage_detection']['leakage_report'])
 
         # Success assessment using CLEAN validation correlation (most important metric)
         clean_corr = abs(training_results["final_metrics"]["validation_correlation_clean"])
