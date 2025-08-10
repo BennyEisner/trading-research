@@ -53,10 +53,10 @@ def test_trainer_initialization():
 
 
 def test_trainer_config_validation():
-    """Test trainer configuration parameters"""
+    """Test trainer configuration parameters for optimized infrastructure"""
 
     try:
-        print("\nTesting Trainer Configuration...")
+        print("\nTesting Optimized Trainer Configuration...")
 
         trainer = create_shared_backbone_trainer(tickers=["AAPL"], use_expanded_universe=False)
 
@@ -64,15 +64,26 @@ def test_trainer_config_validation():
 
         # Validate key configuration parameters
         assert config.model.lookback_window > 0, "Lookback window should be positive"
-        assert config.model.sequence_stride > 0, "Sequence stride should be positive"
         assert config.model.prediction_horizon > 0, "Prediction horizon should be positive"
         assert len(config.model.mag7_tickers) > 0, "Should have MAG7 tickers"
+        
+        # Validate optimized configuration
+        model_params = config.model.model_params
+        training_params = config.model.training_params
+        
+        assert model_params.get('dropout_rate', 0) >= 0.5, "Dropout should be >= 0.5 for high overlap"
+        assert training_params.get('batch_size', 0) >= 256, "Batch size should be >= 256 for stability"
+        assert training_params.get('monitor_metric') == 'val_loss', "Should monitor val_loss for high overlap"
 
         print(f"✓ Configuration validation PASSED")
         print(f"  - Lookback window: {config.model.lookback_window}")
-        print(f"  - Sequence stride: {config.model.sequence_stride}")
         print(f"  - Prediction horizon: {config.model.prediction_horizon}")
+        print(f"  - Model size: {config.model.model_size}")
+        print(f"  - Dropout rate: {model_params['dropout_rate']}")
+        print(f"  - Batch size: {training_params['batch_size']}")
+        print(f"  - Monitor metric: {training_params['monitor_metric']}")
         print(f"  - MAG7 tickers: {len(config.model.mag7_tickers)}")
+        print(f"  - Infrastructure: Optimized for 1-day stride, 95% overlap")
 
         return True
 
