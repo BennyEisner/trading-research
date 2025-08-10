@@ -115,44 +115,57 @@ class PatternTargetGenerator:
 
         targets = np.zeros(len(features_df))
 
-        for i in range(max(10, self.lookback_window // 2), len(features_df)):  # Reduced requirements
-            current_momentum = momentum_feature[i]
+        # CRITICAL FIX: Add temporal gap to prevent data leakage
+        temporal_gap = 5
+        max_valid_idx = len(features_df) - temporal_gap - horizon
+        
+        for i in range(self.lookback_window, max_valid_idx):
+            
+            # FIXED: Use ONLY historical data - NO current timepoint
+            historical_start = i - self.lookback_window
+            historical_end = i  # Exclusive, so i-1 is last used timepoint
+            
+            historical_momentum = momentum_feature[historical_start:historical_end]
+            historical_returns = returns_1d[historical_start:historical_end]
 
-            if np.isnan(current_momentum):
+            # Remove NaN values
+            valid_hist_mask = ~np.isnan(historical_momentum)
+            if np.sum(valid_hist_mask) < 10:  # Need sufficient historical data
                 continue
-
-            # BALANCED: Use historical data with relaxed requirements for better signal generation
-            historical_period = slice(max(0, i - min(self.lookback_window, i)), i)
-            historical_returns = returns_1d[historical_period]
-            historical_momentum = momentum_feature[historical_period]
-
-            if len(historical_returns) < 5:  # Relaxed from 10 to 5 days minimum
+                
+            historical_momentum_clean = historical_momentum[valid_hist_mask]
+            historical_returns_clean = historical_returns[valid_hist_mask]
+            
+            # Pattern detection using ONLY historical data
+            momentum_strength = np.mean(np.abs(historical_momentum_clean))
+            momentum_consistency = 1.0 - (np.std(historical_momentum_clean) / (np.mean(np.abs(historical_momentum_clean)) + 1e-8))
+            
+            # Only consider strong, consistent historical momentum
+            if momentum_strength < 0.2 or momentum_consistency < 0.5:
+                targets[i] = 0.0
                 continue
-
-            # Signal strength based on current momentum magnitude
-            momentum_strength = np.abs(current_momentum)
-            momentum_percentile = np.percentile(np.abs(momentum_feature[~np.isnan(momentum_feature)]), 90)
-            normalized_momentum = min(momentum_strength / (momentum_percentile + 1e-8), 1.0)
-
-            # IMPROVED: More generous signal generation while maintaining temporal safety
-            valid_momentum = historical_momentum[~np.isnan(historical_momentum)]
-            if len(valid_momentum) > 2:  # Relaxed requirement
-                # Momentum strength as primary factor (more responsive)
-                primary_signal = normalized_momentum
+            
+            # STEP 2: Future validation with temporal gap (proper prediction)
+            future_start = i + temporal_gap
+            future_end = future_start + horizon
+            
+            if future_end >= len(returns_1d):
+                continue
                 
-                # Historical context as secondary factor
-                momentum_consistency = 1.0 - (np.std(valid_momentum) / (np.mean(np.abs(valid_momentum)) + 1e-8))
-                momentum_consistency = max(0.3, min(1.0, momentum_consistency))  # Floor at 0.3
-                
-                # Relative strength (less restrictive)
-                hist_avg = np.mean(np.abs(valid_momentum)) if len(valid_momentum) > 0 else 1.0
-                relative_strength = min(momentum_strength / (hist_avg + 1e-8), 2.0)  # Allow up to 2x
-                
-                # BALANCED: Weight primary signal more heavily
-                targets[i] = 0.6 * primary_signal + 0.4 * (momentum_consistency * min(relative_strength, 1.0))
+            future_returns = returns_1d[future_start:future_end]
+            future_returns_clean = future_returns[~np.isnan(future_returns)]
+            
+            if len(future_returns_clean) < 3:
+                continue
+            
+            # Target: Does historical momentum pattern persist in future?
+            historical_direction = np.sign(np.mean(historical_momentum_clean))
+            future_direction_consistency = np.mean(np.sign(future_returns_clean) == historical_direction)
+            
+            if future_direction_consistency > 0.6:  # 60% consistency required
+                targets[i] = 1.0
             else:
-                # Fallback to pure signal strength when insufficient history
-                targets[i] = normalized_momentum * 0.5  # Give some signal even with limited history
+                targets[i] = 0.0
 
         # Normalize to [0, 1] range
         if np.max(targets) > 0:
@@ -230,145 +243,174 @@ class PatternTargetGenerator:
 
     def _generate_trend_exhaustion_target(self, features_df: pd.DataFrame, horizon: int = 5) -> np.ndarray:
         """
-        Generate continuous trend exhaustion target using ONLY historical data
-
-        CRITICAL FIX: Removes forward-looking validation - uses only past trend patterns
-        - Signal strength based on historical trend exhaustion patterns
-        - Creates continuous targets in [0, 1] range without future data leakage
+        FIXED: Generate trend exhaustion target with NO data leakage
+        
+        METHODOLOGY (LEAK-FREE):
+        1. Detect trend exhaustion using ONLY historical data (i-lookback to i-1)  
+        2. Apply 5-day temporal gap (skip i to i+4)
+        3. Validate if trend reversal occurs in future period (i+5 to i+5+horizon)
+        4. Target at position i predicts future trend reversal based on historical exhaustion
         """
 
+        print("Generating LEAK-FREE trend exhaustion targets...")
+        
         trend_exhaustion = features_df["trend_exhaustion"].values
         returns_3d = features_df["returns_3d"].values
 
         targets = np.zeros(len(features_df))
 
-        for i in range(max(8, self.lookback_window // 2), len(features_df)):  # More generous starting point
-            current_exhaustion = trend_exhaustion[i]
-
-            if np.isnan(current_exhaustion):
-                continue
-
-            # Signal strength normalization
-            exhaustion_strength = np.abs(current_exhaustion)
-            exhaustion_percentile = np.percentile(np.abs(trend_exhaustion[~np.isnan(trend_exhaustion)]), 75)  # Less restrictive
-            normalized_exhaustion = min(exhaustion_strength / (exhaustion_percentile + 1e-8), 1.0)
-
-            # BALANCED: Use historical data with relaxed requirements
-            historical_period = slice(max(0, i - min(self.lookback_window, i)), i)
-            historical_returns = returns_3d[historical_period]
-            historical_exhaustion = trend_exhaustion[historical_period]
-
-            if len(historical_returns) < 5:  # Reduced requirement
-                continue
-
-            # Current trend strength relative to recent history
-            current_trend = returns_3d[i] if not np.isnan(returns_3d[i]) else 0
-            valid_historical_returns = historical_returns[~np.isnan(historical_returns)]
+        # CRITICAL FIX: Add temporal gap to prevent data leakage
+        temporal_gap = 5
+        max_valid_idx = len(features_df) - temporal_gap - horizon
+        
+        for i in range(self.lookback_window, max_valid_idx):
             
-            if len(valid_historical_returns) > 0:
-                historical_trend_strength = np.mean(np.abs(valid_historical_returns))
-                current_trend_strength = abs(current_trend)
+            # STEP 1: Historical trend exhaustion analysis (STRICT: only past data)
+            # Use data from (i-lookback_window) to (i-1) - NO current timepoint
+            historical_start = i - self.lookback_window
+            historical_end = i  # Exclusive, so actually i-1 is last used index
+            
+            if historical_start < 0:
+                continue
                 
-                # Relative exhaustion: current exhaustion vs historical average
-                valid_exhaustion = historical_exhaustion[~np.isnan(historical_exhaustion)]
-                if len(valid_exhaustion) > 5:
-                    historical_exhaustion_avg = np.mean(valid_exhaustion)
-                    exhaustion_relative_strength = min(current_exhaustion / (historical_exhaustion_avg + 1e-8), 2.0)
-                else:
-                    exhaustion_relative_strength = 1.0
-
-                # Historical pattern consistency
-                exhaustion_consistency = 1.0 - (np.std(valid_exhaustion) / (np.mean(np.abs(valid_exhaustion)) + 1e-8)) if len(valid_exhaustion) > 5 else 0.5
-                exhaustion_consistency = max(0.0, min(1.0, exhaustion_consistency))
-
-                # IMPROVED: More generous combination for better signal generation
-                primary_signal = normalized_exhaustion
-                context_factor = 0.7 * abs(exhaustion_relative_strength) + 0.3 * exhaustion_consistency
+            historical_exhaustion = trend_exhaustion[historical_start:historical_end]
+            historical_returns = returns_3d[historical_start:historical_end]
+            
+            # Remove NaN values
+            valid_mask = ~np.isnan(historical_exhaustion)
+            if np.sum(valid_mask) < 10:  # Need sufficient historical data
+                continue
                 
-                # Weight primary signal more heavily
-                targets[i] = 0.7 * primary_signal + 0.3 * min(context_factor, 1.0)
+            historical_exhaustion_clean = historical_exhaustion[valid_mask]
+            historical_returns_clean = historical_returns[valid_mask]
+            
+            # Pattern detection: Strong trend exhaustion signal in historical period?
+            exhaustion_strength = np.mean(np.abs(historical_exhaustion_clean))
+            
+            if exhaustion_strength < 0.2:  # No strong exhaustion signal detected
+                targets[i] = 0.0
+                continue
+            
+            # Historical trend direction (what trend might reverse?)
+            if len(historical_returns_clean) > 0:
+                historical_trend = np.mean(historical_returns_clean)
+                
+                if abs(historical_trend) < 0.01:  # No clear trend to exhaust
+                    targets[i] = 0.0
+                    continue
             else:
-                # Fallback when insufficient history - use signal strength directly
-                targets[i] = normalized_exhaustion * 0.6  # More generous fallback
+                continue
+            
+            # STEP 2: Temporal gap (skip i to i+gap-1)
+            gap_start = i
+            gap_end = i + temporal_gap
+            
+            # STEP 3: Future validation (i+gap to i+gap+horizon)
+            future_start = gap_end
+            future_end = gap_end + horizon
+            
+            if future_end >= len(returns_3d):
+                continue
+                
+            future_returns = returns_3d[future_start:future_end]
+            
+            # Remove NaN from future period
+            future_returns_clean = future_returns[~np.isnan(future_returns)]
+            if len(future_returns_clean) < 3:  # Need sufficient future data
+                continue
+            
+            # Pattern validation: Does trend actually reverse after exhaustion?
+            future_trend = np.mean(future_returns_clean)
+            
+            # Target: 1 if trend reversal occurs after historical exhaustion signal
+            trend_reversal = np.sign(historical_trend) != np.sign(future_trend) and abs(future_trend) > 0.005
+            
+            if trend_reversal:
+                targets[i] = 1.0
+            else:
+                targets[i] = 0.0
 
-        # Normalize to [0, 1] range for consistent scaling
-        if np.max(targets) > 0:
-            normalized_targets = targets / np.max(targets)
-        else:
-            normalized_targets = targets
-
-        return normalized_targets
+        print(f"Generated {np.sum(targets > 0)} positive trend exhaustion targets out of {max_valid_idx - self.lookback_window} valid samples")
+        return targets
 
     def _generate_volume_divergence_target(self, features_df: pd.DataFrame, horizon: int = 5) -> np.ndarray:
         """
-        Generate continuous volume-price divergence target using ONLY historical data
-
-        CRITICAL FIX: Removes forward-looking validation - uses only past divergence patterns
-        - Signal strength based on historical volume-price relationship patterns
-        - Creates continuous targets in [0, 1] range without future data leakage
+        FIXED: Generate volume divergence target with NO data leakage
+        
+        METHODOLOGY (LEAK-FREE):
+        1. Detect volume-price divergence using ONLY historical data (i-lookback to i-1)
+        2. Apply 5-day temporal gap (skip i to i+4) 
+        3. Validate if divergence resolves in future period (i+5 to i+5+horizon)
+        4. Target at position i predicts future price movement based on historical divergence
         """
 
+        print("Generating LEAK-FREE volume divergence targets...")
+        
         volume_divergence = features_df["volume_price_divergence"].values
         returns_1d = features_df["returns_1d"].values
 
         targets = np.zeros(len(features_df))
 
-        for i in range(max(8, self.lookback_window // 3), len(features_df)):  # Even more generous
-            current_divergence = volume_divergence[i]
-
-            if np.isnan(current_divergence):
+        # CRITICAL FIX: Add temporal gap to prevent data leakage
+        temporal_gap = 5
+        max_valid_idx = len(features_df) - temporal_gap - horizon
+        
+        for i in range(self.lookback_window, max_valid_idx):
+            
+            # STEP 1: Historical volume divergence analysis (STRICT: only past data)
+            # Use data from (i-lookback_window) to (i-1) - NO current timepoint
+            historical_start = i - self.lookback_window
+            historical_end = i  # Exclusive, so actually i-1 is last used index
+            
+            if historical_start < 0:
                 continue
-
-            # BALANCED: Use historical data with minimal requirements for signal generation
-            historical_period = slice(max(0, i - min(self.lookback_window, i)), i)
-            historical_returns = returns_1d[historical_period]
-            historical_divergence = volume_divergence[historical_period]
-
-            if len(historical_returns) < 3:  # Very minimal requirement
+                
+            historical_divergence = volume_divergence[historical_start:historical_end]
+            
+            # Remove NaN values
+            valid_mask = ~np.isnan(historical_divergence)
+            if np.sum(valid_mask) < 10:  # Need sufficient historical data
                 continue
-
-            # Signal strength normalization
-            divergence_strength = np.abs(current_divergence)
-            divergence_percentile = np.percentile(np.abs(volume_divergence[~np.isnan(volume_divergence)]), 90)
-            normalized_divergence = min(divergence_strength / (divergence_percentile + 1e-8), 1.0)
-
-            # Historical divergence pattern analysis
-            valid_divergence = historical_divergence[~np.isnan(historical_divergence)]
-            valid_returns = historical_returns[~np.isnan(historical_returns)]
-
-            if len(valid_divergence) > 5 and len(valid_returns) > 5:
-                # Historical divergence consistency
-                divergence_consistency = 1.0 - (np.std(valid_divergence) / (np.mean(np.abs(valid_divergence)) + 1e-8))
-                divergence_consistency = max(0.0, min(1.0, divergence_consistency))
-
-                # Current divergence relative to historical patterns
-                historical_divergence_avg = np.mean(np.abs(valid_divergence))
-                relative_divergence_strength = min(divergence_strength / (historical_divergence_avg + 1e-8), 2.0)
-
-                # Historical volatility context
-                historical_volatility = np.std(valid_returns) if len(valid_returns) > 0 else 0.01
-
-                # IMPROVED: More responsive signal generation
-                primary_signal = normalized_divergence
                 
-                # Context factors (less restrictive)
-                context_strength = min(abs(relative_divergence_strength), 1.5)
-                volatility_factor = min(0.02 / (historical_volatility + 1e-8), 1.5)
+            historical_divergence_clean = historical_divergence[valid_mask]
+            
+            # Pattern detection: Strong volume-price divergence in historical period?
+            divergence_strength = np.mean(np.abs(historical_divergence_clean))
+            
+            if divergence_strength < 0.15:  # No strong divergence signal detected
+                targets[i] = 0.0
+                continue
+            
+            # STEP 2: Temporal gap (skip i to i+gap-1)
+            gap_start = i
+            gap_end = i + temporal_gap
+            
+            # STEP 3: Future validation (i+gap to i+gap+horizon)  
+            future_start = gap_end
+            future_end = gap_end + horizon
+            
+            if future_end >= len(returns_1d):
+                continue
                 
-                # Combine with emphasis on signal strength
-                targets[i] = 0.6 * primary_signal + 0.4 * (divergence_consistency * context_strength * min(volatility_factor, 1.0))
+            future_returns = returns_1d[future_start:future_end]
+            
+            # Remove NaN from future period
+            future_returns_clean = future_returns[~np.isnan(future_returns)]
+            if len(future_returns_clean) < 3:  # Need sufficient future data
+                continue
+            
+            # Pattern validation: Does divergence lead to significant price movement?
+            # Volume divergence typically resolves with increased price volatility
+            future_volatility = np.std(future_returns_clean)
+            
+            # Target: 1 if divergence resolves with significant price movement
+            if future_volatility > 0.012:  # Above-average volatility after divergence
+                targets[i] = 1.0
             else:
-                # Generous fallback for signal generation
-                targets[i] = normalized_divergence * 0.5
+                targets[i] = 0.0
 
-        # Return continuous targets (0-1 range) instead of binary
-        # Normalize to [0, 1] range for consistent scaling
-        if np.max(targets) > 0:
-            normalized_targets = targets / np.max(targets)
-        else:
-            normalized_targets = targets
-
-        return normalized_targets
+        print(f"Generated {np.sum(targets > 0)} positive volume divergence targets out of {max_valid_idx - self.lookback_window} valid samples")
+        return targets
 
     def _generate_combined_pattern_target(self, individual_targets: Dict[str, np.ndarray]) -> np.ndarray:
         """

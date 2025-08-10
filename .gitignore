@@ -129,9 +129,13 @@ temp/
 tmp/
 
 src/validation/tests/.hypothesis
-archive/investigation
+archive/
 production_runs/
 internal/
 lstm_training_runs/
+
+codebase_analysis/
+target_analysis_results/
+
 
 
