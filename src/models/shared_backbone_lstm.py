@@ -101,18 +101,62 @@ class SharedBackboneLSTMBuilder:
         
         x = layers.Dropout(dropout_rate * 0.8, name="shared_dropout_2")(x)
         
-        # Final prediction layer with sigmoid activation for (0,1) targets
-        output = layers.Dense(
-            1, 
-            activation="sigmoid",  # FIXED: sigmoid for (0,1) range targets
-            name="pattern_prediction",
-            kernel_initializer="glorot_uniform",  # Better initialization
-            bias_initializer="zeros",
-            kernel_regularizer=keras.regularizers.l2(l2_reg * 1.5),  # Extra regularization on output
-            activity_regularizer=keras.regularizers.l1(0.001)  # L1 for sparsity
-        )(x)
+        # Multi-task architecture: Check if multi-task mode is enabled
+        multi_task_mode = params.get("multi_task_mode", True)
         
-        model = keras.Model(inputs=main_input, outputs=output, name="SharedBackboneLSTM")
+        if multi_task_mode:
+            # Four specialized pattern heads for multi-task learning
+            print("🔧 Building Multi-Task LSTM with 4 pattern heads")
+            
+            momentum_head = layers.Dense(
+                1,
+                activation="sigmoid", 
+                name="momentum_persistence",
+                kernel_initializer="glorot_uniform",
+                kernel_regularizer=keras.regularizers.l2(l2_reg),
+            )(x)
+            
+            volatility_head = layers.Dense(
+                1,
+                activation="sigmoid",
+                name="volatility_regime", 
+                kernel_initializer="glorot_uniform",
+                kernel_regularizer=keras.regularizers.l2(l2_reg),
+            )(x)
+            
+            trend_head = layers.Dense(
+                1,
+                activation="sigmoid",
+                name="trend_exhaustion",
+                kernel_initializer="glorot_uniform", 
+                kernel_regularizer=keras.regularizers.l2(l2_reg),
+            )(x)
+            
+            volume_head = layers.Dense(
+                1,
+                activation="sigmoid",
+                name="volume_divergence",
+                kernel_initializer="glorot_uniform",
+                kernel_regularizer=keras.regularizers.l2(l2_reg),
+            )(x)
+            
+            # Multi-output model
+            outputs = [momentum_head, volatility_head, trend_head, volume_head]
+            model = keras.Model(inputs=main_input, outputs=outputs, name="MultiTaskPatternLSTM")
+        else:
+            # Single output for backward compatibility
+            print("🔧 Building Single-Task LSTM (backward compatibility)")
+            output = layers.Dense(
+                1, 
+                activation="sigmoid",
+                name="pattern_prediction",
+                kernel_initializer="glorot_uniform",
+                bias_initializer="zeros",
+                kernel_regularizer=keras.regularizers.l2(l2_reg * 1.5),
+                activity_regularizer=keras.regularizers.l1(0.001)
+            )(x)
+            
+            model = keras.Model(inputs=main_input, outputs=output, name="SharedBackboneLSTM")
         
         # Enhanced optimizer with higher learning rate for pattern learning
         # Increased from 0.0008 to help escape local minimum with constant predictions
@@ -124,17 +168,40 @@ class SharedBackboneLSTMBuilder:
             clipnorm=1.0  # Slightly relaxed gradient clipping
         )
         
-        # STANDARD PATTERN DETECTION LOSS - Let natural correlation emerge
-        print(f"🎯 Using standard MSE loss for pattern detection training")
-        print(f"   - Target: Continuous pattern confidence scores [0,1]")  
-        print(f"   - Loss: MSE optimizes pattern prediction accuracy")
-        print(f"   - Natural correlation will emerge from proper pattern learning")
-        
-        model.compile(
-            optimizer=optimizer,
-            loss="mse",  # Standard MSE for continuous [0,1] pattern targets
-            metrics=["mae", self._pattern_detection_accuracy, self._correlation_metric]
-        )
+        # Multi-task vs Single-task compilation
+        if multi_task_mode:
+            # Use custom multi-task loss with positive rate weighting
+            positive_rates = params.get("positive_rates", {
+                "momentum_persistence": 0.3,
+                "volatility_regime": 0.25,
+                "trend_exhaustion": 0.2, 
+                "volume_divergence": 0.25
+            })
+            
+            correlation_weight = params.get("correlation_weight", 0.1)
+            custom_loss = self._create_multi_task_loss(positive_rates, correlation_weight)
+            
+            print(f"🎯 Using Multi-Task Loss with correlation awareness")
+            print(f"   - Weighted BCE per head based on positive rates: {positive_rates}")
+            print(f"   - Correlation auxiliary loss weight: {correlation_weight}")
+            print(f"   - Expected: Balanced learning across all pattern types")
+            
+            model.compile(
+                optimizer=optimizer,
+                loss=custom_loss,
+                metrics=['accuracy', self._correlation_metric_per_head]
+            )
+        else:
+            # Standard single-task compilation for backward compatibility
+            print(f"🎯 Using standard MSE loss for single-task pattern detection")
+            print(f"   - Target: Combined pattern confidence scores [0,1]")  
+            print(f"   - Loss: MSE optimizes overall pattern prediction accuracy")
+            
+            model.compile(
+                optimizer=optimizer,
+                loss="mse",
+                metrics=["mae", self._pattern_detection_accuracy, self._correlation_metric]
+            )
         
         return model
 
@@ -305,6 +372,80 @@ class SharedBackboneLSTMBuilder:
         
         return callbacks
 
+    def _create_multi_task_loss(self, positive_rates: Dict[str, float], correlation_weight: float = 0.1):
+        """
+        Create custom multi-task loss combining weighted BCE and correlation penalty
+        
+        Args:
+            positive_rates: Dictionary of positive rates per pattern for weight calculation
+            correlation_weight: Weight for correlation auxiliary loss
+            
+        Returns:
+            Custom loss function for multi-task training
+        """
+        pattern_names = ['momentum_persistence', 'volatility_regime', 'trend_exhaustion', 'volume_divergence']
+        
+        def multi_task_loss(y_true_list, y_pred_list):
+            """
+            Multi-task loss function with weighted BCE and correlation awareness
+            
+            Args:
+                y_true_list: List of true targets for each head [y_momentum, y_volatility, y_trend, y_volume]
+                y_pred_list: List of predictions for each head [pred_momentum, pred_volatility, pred_trend, pred_volume]
+            """
+            total_loss = 0.0
+            
+            # Weighted binary cross-entropy per head
+            for i, pattern_name in enumerate(pattern_names):
+                y_true = y_true_list[i] if isinstance(y_true_list, list) else y_true_list
+                y_pred = y_pred_list[i] if isinstance(y_pred_list, list) else y_pred_list
+                
+                # Calculate positive weight (inverse frequency weighting)
+                pos_rate = positive_rates.get(pattern_name, 0.5)
+                pos_weight = (1.0 - pos_rate) / pos_rate if pos_rate > 0 else 1.0
+                
+                # Weighted binary cross-entropy
+                # Using manual calculation to avoid numerical instabilities
+                epsilon = 1e-7
+                y_pred_clipped = tf.clip_by_value(y_pred, epsilon, 1 - epsilon)
+                
+                bce = -(pos_weight * y_true * tf.math.log(y_pred_clipped) + 
+                       (1.0 - y_true) * tf.math.log(1.0 - y_pred_clipped))
+                
+                total_loss += tf.reduce_mean(bce)
+            
+            # Correlation-aware auxiliary loss
+            correlation_penalty = 0.0
+            for i in range(len(pattern_names)):
+                y_true = y_true_list[i] if isinstance(y_true_list, list) else y_true_list
+                y_pred = y_pred_list[i] if isinstance(y_pred_list, list) else y_pred_list
+                
+                # Calculate Pearson correlation
+                y_true_centered = y_true - tf.reduce_mean(y_true)
+                y_pred_centered = y_pred - tf.reduce_mean(y_pred)
+                
+                numerator = tf.reduce_sum(y_true_centered * y_pred_centered)
+                denominator = tf.sqrt(tf.reduce_sum(tf.square(y_true_centered)) * 
+                                    tf.reduce_sum(tf.square(y_pred_centered))) + 1e-8
+                
+                correlation = numerator / denominator
+                # Penalty for low correlation (encourage higher correlation)
+                correlation_penalty += (1.0 - tf.abs(correlation))
+            
+            # Combined loss
+            return total_loss + correlation_weight * correlation_penalty
+        
+        return multi_task_loss
+
+    def _correlation_metric_per_head(self, y_true, y_pred):
+        """Calculate correlation metric for multi-head output (takes first head for compatibility)"""
+        if isinstance(y_pred, list):
+            y_pred = y_pred[0]  # Use first head for metric calculation
+        if isinstance(y_true, list):
+            y_true = y_true[0]
+            
+        return self._correlation_metric(y_true, y_pred)
+
     def _pattern_detection_accuracy(self, y_true, y_pred):
         """Calculate pattern detection accuracy metric for pattern confidence scores"""
         # Convert pattern confidence scores to binary classification (threshold = 0.5)
@@ -336,26 +477,34 @@ class SharedBackboneLSTMBuilder:
         trainable_params = sum([tf.keras.backend.count_params(w) for w in model.trainable_weights])
         non_trainable_params = sum([tf.keras.backend.count_params(w) for w in model.non_trainable_weights])
         
+        # Check if model is multi-task
+        is_multi_task = isinstance(model.output, list) and len(model.output) == 4
+        
         return {
-            "model_name": "SharedBackboneLSTM",
+            "model_name": "MultiTaskPatternLSTM" if is_multi_task else "SharedBackboneLSTM",
             "input_shape": input_shape,
             "total_parameters": total_params,
             "trainable_parameters": trainable_params,
             "non_trainable_parameters": non_trainable_params,
-            "architecture_type": "shared_backbone_regularized",
+            "architecture_type": "multi_task_shared_backbone" if is_multi_task else "shared_backbone_regularized",
+            "output_heads": 4 if is_multi_task else 1,
+            "pattern_specialization": ["momentum_persistence", "volatility_regime", "trend_exhaustion", "volume_divergence"] if is_multi_task else ["combined_pattern"],
             "regularization_features": [
                 "enhanced_dropout_0.45",
                 "increased_l2_regularization_0.006", 
                 "batch_normalization",
                 "recurrent_dropout",
                 "gradient_clipping_0.8",
-                "activity_regularization_l1"
+                "weighted_binary_crossentropy" if is_multi_task else "mse_loss",
+                "correlation_aware_auxiliary_loss" if is_multi_task else "standard_correlation"
             ],
             "output_activation": "sigmoid", 
             "output_range": "(0, 1)",
-            "designed_for": "expanded_universe_training",
+            "designed_for": "expanded_universe_multi_task_training" if is_multi_task else "expanded_universe_training",
             "target_parameter_count": "~400k",
-            "overfitting_prevention": "high"
+            "overfitting_prevention": "high",
+            "loss_function": "weighted_bce_with_correlation_penalty" if is_multi_task else "mse",
+            "training_approach": "balanced_multi_pattern_learning" if is_multi_task else "combined_pattern_learning"
         }
 
 

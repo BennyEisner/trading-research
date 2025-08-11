@@ -120,13 +120,38 @@ class SharedBackboneTrainer:
                     print(f"Warning: Only {len(available_features)} features available for {ticker}")
                     continue
 
-                # Generate pattern detection targets (NOT return prediction)
+                # Generate enhanced pattern detection targets with dynamic features
                 try:
-                    pattern_targets = self.pattern_target_generator.generate_all_pattern_targets(
-                        features_df, primary_horizon=self.config.model.prediction_horizon
+                    pattern_results = self.pattern_target_generator.generate_all_pattern_targets(
+                        features_df,
+                        base_horizon=self.config.model.prediction_horizon,
+                        enable_dynamic_horizons=True,
+                        enable_adaptive_thresholds=True,
+                        enable_target_calibration=True
                     )
-                    # Use combined pattern confidence as primary target
-                    target_values = pattern_targets["pattern_confidence_score"]
+                    
+                    # Check if multi-task mode is enabled
+                    multi_task_mode = getattr(self.config.model, 'multi_task_mode', True)
+                    
+                    if multi_task_mode:
+                        # Multi-task targets: Use individual pattern targets
+                        print(f"Multi-task mode: Using individual pattern targets for {ticker}")
+                        multi_targets = {
+                            "momentum_persistence": pattern_results["momentum_persistence"],
+                            "volatility_regime": pattern_results["volatility_regime"], 
+                            "trend_exhaustion": pattern_results["trend_exhaustion"],
+                            "volume_divergence": pattern_results["volume_divergence"]
+                        }
+                        target_values = multi_targets
+                        calibration_params = pattern_results.get("calibration_params", {})
+                        positive_rates = pattern_results.get("positive_rates", {})
+                    else:
+                        # Single-task mode: Use combined pattern confidence (backward compatibility)
+                        print(f"Single-task mode: Using combined pattern confidence for {ticker}")
+                        target_values = pattern_results["pattern_confidence_score"]
+                        calibration_params = {}
+                        positive_rates = {"pattern_confidence_score": np.mean(target_values > 0.5)}
+                        
                 except Exception as e:
                     print(f"Warning: Could not generate pattern targets for {ticker}: {e}")
                     continue
@@ -147,19 +172,38 @@ class SharedBackboneTrainer:
                     data_reduction = (training_stride - 1) / self.config.model.lookback_window * 100
                     print(f"  Data utilization impact: -{data_reduction:.1f}% sequences (acceptable for better generalization)")
 
-                    X, y = self._prepare_pattern_detection_sequences(
-                        features_df=features_df,
-                        feature_columns=available_features,
-                        pattern_targets=target_values,
-                        sequence_length=self.config.model.lookback_window,  # 20 days
-                        stride=training_stride,  # Configurable training stride
-                    )
+                    if multi_task_mode:
+                        # Multi-task sequence preparation
+                        X, multi_y = self._prepare_multi_task_sequences(
+                            features_df=features_df,
+                            feature_columns=available_features,
+                            multi_targets=target_values,
+                            sequence_length=self.config.model.lookback_window,
+                            stride=training_stride,
+                        )
+                        y = multi_y  # List of 4 target arrays
+                    else:
+                        # Single-task sequence preparation (backward compatibility)
+                        X, y = self._prepare_pattern_detection_sequences(
+                            features_df=features_df,
+                            feature_columns=available_features,
+                            pattern_targets=target_values,
+                            sequence_length=self.config.model.lookback_window,
+                            stride=training_stride,
+                        )
 
                     # Validate sequences
                     sequence_valid, validation_issues = self.pipeline_validator.validate_sequences(X, y)
 
                     if sequence_valid:
-                        training_data[ticker] = (X, y)
+                        # Store training data with additional metadata for multi-task training
+                        training_data[ticker] = {
+                            "sequences": X,
+                            "targets": y,
+                            "multi_task_mode": multi_task_mode,
+                            "calibration_params": calibration_params,
+                            "positive_rates": positive_rates
+                        }
                         total_sequences += len(X)
 
                         # Log sequence overlap statistics with configured training stride
@@ -187,13 +231,13 @@ class SharedBackboneTrainer:
         return training_data
 
     def train_shared_backbone(
-        self, training_data: Dict[str, Tuple[np.ndarray, np.ndarray]], validation_split: float = 0.2, epochs: int = 100
+        self, training_data: Dict[str, Dict[str, Any]], validation_split: float = 0.2, epochs: int = 100
     ) -> Dict[str, Any]:
         """
-        Train shared backbone model on combined data from all tickers
+        Train shared backbone model on combined data from all tickers with multi-task support
 
         Args:
-            training_data: Prepared training data from prepare_training_data
+            training_data: Enhanced training data with multi-task support from prepare_training_data
             validation_split: Fraction of data to use for validation
             epochs: Number of training epochs
 
@@ -202,19 +246,87 @@ class SharedBackboneTrainer:
         """
         print(f"Training shared backbone LSTM on {len(training_data)} tickers")
 
+        # Check if we're in multi-task mode by looking at the first ticker
+        first_ticker_data = list(training_data.values())[0]
+        multi_task_mode = first_ticker_data.get("multi_task_mode", False)
+        
+        print(f"Training mode: {'Multi-task (4 pattern heads)' if multi_task_mode else 'Single-task (combined pattern)'}")
+
         all_X = []
-        all_y = []
         ticker_indices = {}  # Track which sequences belong to which ticker
+        combined_positive_rates = {}
+        all_calibration_params = {}
 
-        current_idx = 0
-        for ticker, (X, y) in training_data.items():
-            all_X.append(X)
-            all_y.append(y)
-            ticker_indices[ticker] = (current_idx, current_idx + len(X))
-            current_idx += len(X)
+        if multi_task_mode:
+            # Multi-task data combination
+            all_y_momentum = []
+            all_y_volatility = []
+            all_y_trend = []
+            all_y_volume = []
 
-        combined_X = np.vstack(all_X)
-        combined_y = np.concatenate(all_y)
+            current_idx = 0
+            for ticker, data in training_data.items():
+                X = data["sequences"]
+                y = data["targets"]  # List of 4 arrays
+                
+                all_X.append(X)
+                all_y_momentum.append(y[0])  # momentum_persistence
+                all_y_volatility.append(y[1])  # volatility_regime
+                all_y_trend.append(y[2])     # trend_exhaustion
+                all_y_volume.append(y[3])    # volume_divergence
+                
+                ticker_indices[ticker] = (current_idx, current_idx + len(X))
+                current_idx += len(X)
+                
+                # Collect positive rates and calibration parameters
+                ticker_positive_rates = data.get("positive_rates", {})
+                for pattern, rate in ticker_positive_rates.items():
+                    if pattern not in combined_positive_rates:
+                        combined_positive_rates[pattern] = []
+                    combined_positive_rates[pattern].append(rate)
+                    
+                all_calibration_params[ticker] = data.get("calibration_params", {})
+
+            combined_X = np.vstack(all_X)
+            combined_y = [
+                np.concatenate(all_y_momentum),
+                np.concatenate(all_y_volatility),
+                np.concatenate(all_y_trend),
+                np.concatenate(all_y_volume)
+            ]
+            
+            # Average positive rates across tickers
+            avg_positive_rates = {
+                pattern: np.mean(rates) for pattern, rates in combined_positive_rates.items()
+            }
+            
+            print(f"Multi-task training setup:")
+            print(f"- Combined sequences: {combined_X.shape}")
+            print(f"- Target arrays: 4 heads with {[len(y) for y in combined_y]} targets each")
+            print(f"- Average positive rates: {avg_positive_rates}")
+            
+        else:
+            # Single-task data combination (backward compatibility)
+            all_y = []
+            
+            current_idx = 0
+            for ticker, data in training_data.items():
+                X = data["sequences"]
+                y = data["targets"]  # Single array
+                
+                all_X.append(X)
+                all_y.append(y)
+                ticker_indices[ticker] = (current_idx, current_idx + len(X))
+                current_idx += len(X)
+
+            combined_X = np.vstack(all_X)
+            combined_y = np.concatenate(all_y)
+            avg_positive_rates = {"combined_pattern": np.mean(combined_y > 0.5)}
+            
+            print(f"Single-task training setup:")
+            print(f"- Combined sequences: {combined_X.shape}")
+            print(f"- Combined targets: {len(combined_y)}")
+            print(f"- Positive rate: {avg_positive_rates}")
 
         print(f"Combined training data: {combined_X.shape} sequences, {combined_X.shape[2]} features")
 
@@ -238,7 +350,12 @@ class SharedBackboneTrainer:
         training_stride = self.config.model.training_stride
         training_indices = list(range(0, len(combined_X), training_stride))
         train_X = combined_X[training_indices]
-        train_y = combined_y[training_indices]
+        
+        if multi_task_mode:
+            # Apply stride to each training target array
+            train_y = [y[training_indices] for y in combined_y]
+        else:
+            train_y = combined_y[training_indices]
         
         print(f"   - Original sequences: {len(combined_X)}")
         print(f"   - Training sequences after stride: {len(train_X)}")
@@ -254,14 +371,26 @@ class SharedBackboneTrainer:
         
         # Temporal split: training data comes from earlier time periods
         val_X = combined_X[train_size:]  # Later time periods for validation
-        val_y = combined_y[train_size:]
+        
+        if multi_task_mode:
+            # Multi-task validation split - split each target array
+            val_y = [y[train_size:] for y in combined_y]
+        else:
+            # Single-task validation split
+            val_y = combined_y[train_size:]
         
         # Now apply validation stride to validation set only
         validation_stride = self.config.model.validation_stride
         if validation_stride > 1:
             val_indices = list(range(0, len(val_X), validation_stride))
             val_X = val_X[val_indices]
-            val_y = val_y[val_indices]
+            
+            if multi_task_mode:
+                # Apply stride to each validation target array
+                val_y = [y[val_indices] for y in val_y]
+            else:
+                val_y = val_y[val_indices]
+                
             print(f"   - Applied validation stride {validation_stride} to validation set")
         
         print(f"   - Training temporal range: sequences 0 to {train_size}")
@@ -290,15 +419,25 @@ class SharedBackboneTrainer:
         print(f"   - Validation temporal split: {validation_split*100:.0f}% (leak-free)")
         print(f"   ✅ Pipeline integrity validated")
 
-        # Build shared backbone model
+        # Build shared backbone model with multi-task support
         input_shape = (combined_X.shape[1], combined_X.shape[2])
 
         model_params = self.config.model.model_params.copy()
         
-        # Use standard pattern detection parameters (no correlation optimization)
-        print(f"🔧 REMOVED: Correlation-optimized loss function")
-        print(f"   - Using standard pattern detection loss (MSE/BCE)")
-        print(f"   - Let natural correlation emerge from proper pattern learning")
+        # Add multi-task specific parameters
+        model_params["multi_task_mode"] = multi_task_mode
+        if multi_task_mode:
+            model_params["positive_rates"] = avg_positive_rates
+            model_params["correlation_weight"] = 0.1
+            
+            print(f"🔧 Multi-Task Training Configuration:")
+            print(f"   - 4 specialized pattern heads with weighted BCE loss")
+            print(f"   - Correlation-aware auxiliary loss (weight=0.1)")
+            print(f"   - Adaptive class balancing based on positive rates")
+        else:
+            print(f"🔧 Single-Task Training Configuration:")
+            print(f"   - Combined pattern confidence with MSE loss")
+            print(f"   - Standard correlation tracking")
 
         model = self.lstm_builder.build_model(input_shape, **model_params)
 
@@ -588,6 +727,77 @@ class SharedBackboneTrainer:
         print(f"Data utilization: {sequences_generated / max_start_idx * 100:.1f}%")
 
         return np.array(X_sequences), np.array(y_targets)
+
+    def _prepare_multi_task_sequences(
+        self,
+        features_df: pd.DataFrame,
+        feature_columns: List[str],
+        multi_targets: Dict[str, np.ndarray],
+        sequence_length: int = 20,
+        stride: int = 1,
+    ) -> Tuple[np.ndarray, List[np.ndarray]]:
+        """
+        Prepare sequences for multi-task pattern detection training
+        
+        Args:
+            features_df: DataFrame with features
+            feature_columns: List of feature column names
+            multi_targets: Dictionary of pattern targets {pattern_name: np.ndarray}
+            sequence_length: Length of input sequences
+            stride: Stride between sequences
+            
+        Returns:
+            Tuple of (X_sequences, [y_momentum, y_volatility, y_trend, y_volume])
+        """
+        # Extract feature matrix
+        feature_matrix = features_df[feature_columns].values
+        
+        # Handle NaN values with better strategy than zero-replacement
+        feature_df_clean = pd.DataFrame(feature_matrix, columns=feature_columns)
+        feature_df_clean = feature_df_clean.ffill().bfill().fillna(0.0)
+        feature_matrix = feature_df_clean.values
+        
+        X_sequences = []
+        y_momentum_targets = []
+        y_volatility_targets = []
+        y_trend_targets = []
+        y_volume_targets = []
+        
+        # Use minimal temporal gap for short-term pattern learning (targets are leak-free)
+        prediction_horizon = 1
+        temporal_gap = 0
+        total_future_offset = prediction_horizon + temporal_gap
+        
+        print(f"Multi-task sequence generation: {sequence_length}-day sequences for 4 pattern heads")
+        
+        # Generate sequences
+        max_start_idx = len(feature_matrix) - sequence_length - total_future_offset
+        
+        for i in range(0, max_start_idx, stride):
+            sequence = feature_matrix[i : i + sequence_length]
+            target_idx = i + sequence_length + total_future_offset - 1
+            
+            if target_idx < len(feature_matrix):
+                # Extract targets for all 4 heads at the same time index
+                momentum_target = multi_targets["momentum_persistence"][target_idx]
+                volatility_target = multi_targets["volatility_regime"][target_idx]
+                trend_target = multi_targets["trend_exhaustion"][target_idx]
+                volume_target = multi_targets["volume_divergence"][target_idx]
+                
+                X_sequences.append(sequence)
+                y_momentum_targets.append(momentum_target)
+                y_volatility_targets.append(volatility_target)
+                y_trend_targets.append(trend_target)
+                y_volume_targets.append(volume_target)
+        
+        print(f"Generated {len(X_sequences)} multi-task sequences")
+        
+        return np.array(X_sequences), [
+            np.array(y_momentum_targets),
+            np.array(y_volatility_targets), 
+            np.array(y_trend_targets),
+            np.array(y_volume_targets)
+        ]
 
     def _calculate_pattern_detection_accuracy(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
         """

@@ -8,7 +8,7 @@ Generates binary targets for pattern resolution validation instead of return pre
 import sys
 import warnings
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 
 import numpy as np
 import pandas as pd
@@ -39,21 +39,228 @@ class PatternTargetGenerator:
         self.lookback_window = lookback_window
         self.validation_horizons = validation_horizons
 
-    def generate_all_pattern_targets(
-        self, features_df: pd.DataFrame, primary_horizon: int = 3
-    ) -> Dict[str, np.ndarray]:
+    def _compute_dynamic_horizon(self, features_df: pd.DataFrame, base_horizon: int = 5, 
+                               min_horizon: int = 3, max_horizon: int = 15) -> np.ndarray:
         """
-        Generate all pattern detection targets for training
+        Compute volatility-adjusted horizons per sample
+        
+        Logic:
+        - Low volatility: Longer horizons (patterns take time to resolve)
+        - High volatility: Shorter horizons (patterns resolve quickly)
+        
+        Args:
+            features_df: DataFrame with features including returns_1d
+            base_horizon: Base horizon to scale from
+            min_horizon: Minimum horizon allowed
+            max_horizon: Maximum horizon allowed
+            
+        Returns:
+            Array of dynamic horizons per sample
+        """
+        returns_1d = features_df["returns_1d"].values
+        horizons = np.full(len(features_df), base_horizon)
+        
+        # Rolling volatility calculation (20-day window to match LSTM sequence length)
+        rolling_vol = pd.Series(returns_1d).rolling(window=self.lookback_window, min_periods=10).std()
+        
+        # Remove NaN values for percentile calculation
+        valid_vol = rolling_vol.dropna()
+        if len(valid_vol) < 50:  # Need sufficient data for robust percentiles
+            print("Warning: Insufficient volatility data for dynamic horizons, using base horizon")
+            return horizons
+        
+        # Volatility percentiles for scaling
+        vol_25th = np.percentile(valid_vol, 25)  # Low volatility threshold
+        vol_75th = np.percentile(valid_vol, 75)  # High volatility threshold
+        
+        print(f"Volatility thresholds: 25th={vol_25th:.4f}, 75th={vol_75th:.4f}")
+        
+        for i in range(len(features_df)):
+            if i < self.lookback_window or np.isnan(rolling_vol.iloc[i]):
+                continue  # Use base horizon for early samples or NaN values
+                
+            current_vol = rolling_vol.iloc[i]
+            
+            # Scale horizon based on volatility regime
+            if current_vol < vol_25th:  # Low volatility - extend horizon
+                horizons[i] = min(max_horizon, base_horizon + 3)
+            elif current_vol > vol_75th:  # High volatility - shorten horizon  
+                horizons[i] = max(min_horizon, base_horizon - 2)
+            # else: use base_horizon for medium volatility
+        
+        horizon_counts = np.bincount(horizons.astype(int))
+        print(f"Dynamic horizon distribution: min={np.min(horizons)}, max={np.max(horizons)}, mean={np.mean(horizons):.1f}")
+        
+        return horizons
+
+    def _compute_adaptive_thresholds(self, features_df: pd.DataFrame) -> Dict[str, float]:
+        """
+        Replace fixed thresholds with quantile-based thresholds for balanced positive rates
+        
+        Args:
+            features_df: DataFrame with pattern features
+            
+        Returns:
+            Dictionary of adaptive thresholds per pattern type
+        """
+        thresholds = {}
+        
+        # Momentum persistence threshold (replace fixed 0.2)
+        momentum_values = np.abs(features_df["momentum_persistence_7d"].dropna())
+        if len(momentum_values) > 10:
+            thresholds["momentum_strength"] = np.percentile(momentum_values, 70)  # Target 30% positive rate
+            print(f"Adaptive momentum threshold: {thresholds['momentum_strength']:.4f} (was fixed 0.2)")
+        else:
+            thresholds["momentum_strength"] = 0.2  # Fallback
+        
+        # Volatility regime threshold
+        vol_change_values = np.abs(features_df["volatility_regime_change"].dropna())
+        if len(vol_change_values) > 10:
+            thresholds["volatility_strength"] = np.percentile(vol_change_values, 75)  # Target 25% positive rate
+            print(f"Adaptive volatility threshold: {thresholds['volatility_strength']:.4f}")
+        else:
+            thresholds["volatility_strength"] = 0.15  # Fallback
+        
+        # Trend exhaustion threshold  
+        trend_values = np.abs(features_df["trend_exhaustion"].dropna())
+        if len(trend_values) > 10:
+            thresholds["trend_strength"] = np.percentile(trend_values, 80)  # Target 20% positive rate
+            print(f"Adaptive trend threshold: {thresholds['trend_strength']:.4f}")
+        else:
+            thresholds["trend_strength"] = 0.2  # Fallback
+        
+        # Volume divergence threshold
+        volume_values = np.abs(features_df["volume_price_divergence"].dropna()) 
+        if len(volume_values) > 10:
+            thresholds["volume_strength"] = np.percentile(volume_values, 75)  # Target 25% positive rate
+            print(f"Adaptive volume threshold: {thresholds['volume_strength']:.4f}")
+        else:
+            thresholds["volume_strength"] = 0.15  # Fallback
+            
+        return thresholds
+
+    def _get_fixed_thresholds(self) -> Dict[str, float]:
+        """Return fixed thresholds as fallback when adaptive thresholds are disabled"""
+        return {
+            "momentum_strength": 0.2,
+            "volatility_strength": 0.15,
+            "trend_strength": 0.2,
+            "volume_strength": 0.15
+        }
+
+    def calibrate_targets(self, targets_dict: Dict[str, np.ndarray], 
+                         target_positive_rates: Dict[str, Tuple[float, float]] = None) -> Dict[str, Any]:
+        """
+        Calibrate pattern targets to achieve desired positive rates for balanced learning
+        
+        Args:
+            targets_dict: Generated pattern targets {pattern_name: np.ndarray}
+            target_positive_rates: Dict of {pattern: (min_rate, max_rate)} ranges
+                                  Default: 20-40% for most patterns
+        
+        Returns:
+            Dictionary with calibrated targets and calibration parameters for live inference
+        """
+        if target_positive_rates is None:
+            target_positive_rates = {
+                "momentum_persistence": (0.20, 0.40),
+                "volatility_regime": (0.20, 0.40), 
+                "trend_exhaustion": (0.15, 0.35),  # Slightly lower as trend reversals are rarer
+                "volume_divergence": (0.20, 0.40)
+            }
+        
+        calibration_params = {}
+        calibrated_targets = {}
+        
+        print("Calibrating targets for balanced positive rates...")
+        
+        for pattern_name, targets in targets_dict.items():
+            if pattern_name in target_positive_rates:
+                min_rate, max_rate = target_positive_rates[pattern_name]
+                target_rate = (min_rate + max_rate) / 2.0  # Target middle of range
+                
+                # Current positive rate (using threshold 0.5 for binary classification)
+                current_rate = np.mean(targets > 0.5)
+                
+                print(f"{pattern_name}: current rate={current_rate:.3f}, target range=({min_rate:.3f}, {max_rate:.3f})")
+                
+                if current_rate < min_rate or current_rate > max_rate:
+                    # Compute threshold adjustment to achieve target rate
+                    if current_rate > 0 and current_rate < 1:
+                        # Find threshold that gives us target_rate above it
+                        sorted_targets = np.sort(targets)
+                        threshold_idx = int((1.0 - target_rate) * len(sorted_targets))
+                        optimal_threshold = sorted_targets[max(0, min(threshold_idx, len(sorted_targets)-1))]
+                        
+                        # Apply logistic scaling to adjust distribution around optimal threshold
+                        scaling_factor = 4.0  # Controls steepness of sigmoid
+                        calibrated = 1.0 / (1.0 + np.exp(-scaling_factor * (targets - optimal_threshold)))
+                        
+                        # Verify calibration worked
+                        new_rate = np.mean(calibrated > 0.5)
+                        
+                        calibration_params[pattern_name] = {
+                            "original_positive_rate": current_rate,
+                            "target_positive_rate": target_rate,
+                            "achieved_positive_rate": new_rate,
+                            "threshold": optimal_threshold,
+                            "scaling_factor": scaling_factor,
+                            "calibrated": True
+                        }
+                        calibrated_targets[pattern_name] = calibrated
+                        
+                        print(f"  -> Calibrated to {new_rate:.3f} using threshold={optimal_threshold:.4f}")
+                    else:
+                        # Edge case: all 0s or all 1s - cannot calibrate effectively
+                        calibration_params[pattern_name] = {
+                            "original_positive_rate": current_rate,
+                            "calibrated": False,
+                            "reason": "uniform_distribution"
+                        }
+                        calibrated_targets[pattern_name] = targets
+                        print(f"  -> Cannot calibrate (uniform distribution)")
+                else:
+                    # No calibration needed - already in target range
+                    calibration_params[pattern_name] = {
+                        "original_positive_rate": current_rate,
+                        "calibrated": False,
+                        "reason": "within_target_range"
+                    }
+                    calibrated_targets[pattern_name] = targets
+                    print(f"  -> No calibration needed (within range)")
+            else:
+                # Pattern not in target calibration list
+                calibrated_targets[pattern_name] = targets
+        
+        return {
+            "calibrated_targets": calibrated_targets,
+            "calibration_params": calibration_params,
+            "positive_rates": {name: np.mean(targets > 0.5) for name, targets in calibrated_targets.items()}
+        }
+
+    def generate_all_pattern_targets(
+        self, features_df: pd.DataFrame, 
+        base_horizon: int = 5,
+        enable_dynamic_horizons: bool = True,
+        enable_adaptive_thresholds: bool = True,
+        enable_target_calibration: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Generate all pattern detection targets with dynamic horizons and adaptive thresholds
 
         Args:
             features_df: DataFrame with calculated pattern features
-            primary_horizon: Primary validation horizon (5 days for swing trading)
+            base_horizon: Base validation horizon (default 5 days for swing trading)
+            enable_dynamic_horizons: Whether to use volatility-adjusted horizons
+            enable_adaptive_thresholds: Whether to use quantile-based thresholds
+            enable_target_calibration: Whether to calibrate targets for balanced positive rates
 
         Returns:
-            Dictionary of pattern targets for training
+            Dictionary containing pattern targets, calibration params, and metadata
         """
 
-        print(f"Generating pattern targets for {len(features_df)} samples...")
+        print(f"Generating enhanced pattern targets for {len(features_df)} samples...")
+        print(f"Configuration: dynamic_horizons={enable_dynamic_horizons}, adaptive_thresholds={enable_adaptive_thresholds}, target_calibration={enable_target_calibration}")
 
         # Validate required features exist
         required_features = [
@@ -72,42 +279,110 @@ class PatternTargetGenerator:
         if missing_features:
             raise ValueError(f"Missing required features: {missing_features}")
 
+        # Phase 1: Compute dynamic horizons per sample
+        if enable_dynamic_horizons:
+            dynamic_horizons = self._compute_dynamic_horizon(features_df, base_horizon)
+            print(f"Dynamic horizons enabled: min={np.min(dynamic_horizons)}, max={np.max(dynamic_horizons)}, mean={np.mean(dynamic_horizons):.1f}")
+        else:
+            dynamic_horizons = np.full(len(features_df), base_horizon)
+            print(f"Using fixed horizon: {base_horizon}")
+
+        # Phase 2: Compute adaptive thresholds
+        if enable_adaptive_thresholds:
+            adaptive_thresholds = self._compute_adaptive_thresholds(features_df)
+            print(f"Adaptive thresholds enabled: {adaptive_thresholds}")
+        else:
+            adaptive_thresholds = self._get_fixed_thresholds()
+            print(f"Using fixed thresholds: {adaptive_thresholds}")
+
+        # Phase 3: Generate individual pattern targets with dynamic parameters
         targets = {}
 
-        # Generate each pattern validation target
-        targets["momentum_persistence_binary"] = self._generate_momentum_persistence_target(
-            features_df, horizon=primary_horizon
+        print("Generating individual pattern targets...")
+        targets["momentum_persistence"] = self._generate_momentum_persistence_target(
+            features_df, dynamic_horizons, adaptive_thresholds["momentum_strength"]
         )
 
-        targets["volatility_regime_binary"] = self._generate_volatility_regime_target(
-            features_df, horizon=primary_horizon
+        targets["volatility_regime"] = self._generate_volatility_regime_target(
+            features_df, dynamic_horizons, adaptive_thresholds["volatility_strength"]
         )
 
-        targets["trend_exhaustion_binary"] = self._generate_trend_exhaustion_target(
-            features_df, horizon=primary_horizon
+        targets["trend_exhaustion"] = self._generate_trend_exhaustion_target(
+            features_df, dynamic_horizons, adaptive_thresholds["trend_strength"]
         )
 
-        targets["volume_divergence_binary"] = self._generate_volume_divergence_target(
-            features_df, horizon=primary_horizon
+        targets["volume_divergence"] = self._generate_volume_divergence_target(
+            features_df, dynamic_horizons, adaptive_thresholds["volume_strength"]
         )
 
-        # Create combined pattern confidence target
-        targets["pattern_confidence_score"] = self._generate_combined_pattern_target(targets)
+        # Phase 4: Target calibration for balanced positive rates
+        if enable_target_calibration:
+            calibration_results = self.calibrate_targets(targets)
+            calibrated_targets = calibration_results["calibrated_targets"]
+            
+            # Update targets with calibrated versions
+            targets.update(calibrated_targets)
+            
+            print(f"Target calibration completed:")
+            for pattern, rate in calibration_results["positive_rates"].items():
+                print(f"   - {pattern}: {rate:.3f} positive rate (calibrated)")
+            
+            # Optional: Create combined pattern confidence target for backward compatibility
+            targets["pattern_confidence_score"] = self._generate_combined_pattern_target(targets)
+            
+            return {
+                **targets,
+                "calibration_params": calibration_results["calibration_params"],
+                "positive_rates": calibration_results["positive_rates"],
+                "dynamic_horizons": dynamic_horizons,
+                "adaptive_thresholds": adaptive_thresholds,
+                "configuration": {
+                    "enable_dynamic_horizons": enable_dynamic_horizons,
+                    "enable_adaptive_thresholds": enable_adaptive_thresholds,
+                    "enable_target_calibration": enable_target_calibration,
+                    "base_horizon": base_horizon
+                }
+            }
+        else:
+            # No calibration - calculate basic positive rates
+            positive_rates = {name: np.mean(targets > 0.5) for name, targets in targets.items()}
+            
+            print(f"Generated pattern targets (no calibration):")
+            for target_name, rate in positive_rates.items():
+                print(f"   - {target_name}: {rate:.3f} positive rate")
+            
+            # Optional: Create combined pattern confidence target for backward compatibility
+            targets["pattern_confidence_score"] = self._generate_combined_pattern_target(targets)
+            
+            return {
+                **targets,
+                "positive_rates": positive_rates,
+                "dynamic_horizons": dynamic_horizons,
+                "adaptive_thresholds": adaptive_thresholds,
+                "configuration": {
+                    "enable_dynamic_horizons": enable_dynamic_horizons,
+                    "enable_adaptive_thresholds": enable_adaptive_thresholds,
+                    "enable_target_calibration": enable_target_calibration,
+                    "base_horizon": base_horizon
+                }
+            }
 
-        print(f"Generated pattern targets:")
-        for target_name, target_values in targets.items():
-            positive_rate = np.mean(target_values) if len(target_values) > 0 else 0
-            print(f"   - {target_name}: {positive_rate:.3f} positive rate")
-
-        return targets
-
-    def _generate_momentum_persistence_target(self, features_df: pd.DataFrame, horizon: int = 5) -> np.ndarray:
+    def _generate_momentum_persistence_target(self, features_df: pd.DataFrame, 
+                                            dynamic_horizons: np.ndarray, 
+                                            strength_threshold: float) -> np.ndarray:
         """
-        Generate continuous momentum persistence target using ONLY historical data
+        Generate continuous momentum persistence target with dynamic horizons and adaptive thresholds
 
-        CRITICAL FIX: Removes forward-looking validation - uses only past momentum patterns
+        Enhanced Features:
+        - Dynamic horizons per sample based on volatility
+        - Adaptive threshold based on momentum strength percentiles
         - Signal strength based on historical momentum consistency
         - Creates continuous targets in [0, 1] range without future data leakage
+        
+        Args:
+            features_df: DataFrame with pattern features
+            dynamic_horizons: Array of horizons per sample (volatility-adjusted)
+            strength_threshold: Adaptive threshold for momentum strength filtering
         """
 
         momentum_feature = features_df["momentum_persistence_7d"].values
@@ -117,7 +392,11 @@ class PatternTargetGenerator:
 
         # CRITICAL FIX: Add temporal gap to prevent data leakage
         temporal_gap = 5
-        max_valid_idx = len(features_df) - temporal_gap - horizon
+        # Use max dynamic horizon for conservative boundary calculation
+        max_horizon = int(np.max(dynamic_horizons))
+        max_valid_idx = len(features_df) - temporal_gap - max_horizon
+        
+        print(f"Momentum persistence: using adaptive threshold {strength_threshold:.4f} and dynamic horizons (max={max_horizon})")
         
         for i in range(self.lookback_window, max_valid_idx):
             
@@ -140,14 +419,15 @@ class PatternTargetGenerator:
             momentum_strength = np.mean(np.abs(historical_momentum_clean))
             momentum_consistency = 1.0 - (np.std(historical_momentum_clean) / (np.mean(np.abs(historical_momentum_clean)) + 1e-8))
             
-            # Only consider strong, consistent historical momentum
-            if momentum_strength < 0.2 or momentum_consistency < 0.5:
+            # Use adaptive threshold instead of fixed 0.2
+            if momentum_strength < strength_threshold or momentum_consistency < 0.5:
                 targets[i] = 0.0
                 continue
             
-            # STEP 2: Future validation with temporal gap (proper prediction)
+            # STEP 2: Future validation with temporal gap using dynamic horizon for this sample
+            current_horizon = int(dynamic_horizons[i])
             future_start = i + temporal_gap
-            future_end = future_start + horizon
+            future_end = future_start + current_horizon
             
             if future_end >= len(returns_1d):
                 continue
@@ -175,13 +455,22 @@ class PatternTargetGenerator:
 
         return normalized_targets
 
-    def _generate_volatility_regime_target(self, features_df: pd.DataFrame, horizon: int = 5) -> np.ndarray:
+    def _generate_volatility_regime_target(self, features_df: pd.DataFrame, 
+                                          dynamic_horizons: np.ndarray, 
+                                          strength_threshold: float) -> np.ndarray:
         """
-        Generate continuous volatility regime target using ONLY historical data
+        Generate continuous volatility regime target with dynamic horizons and adaptive thresholds
 
-        CRITICAL FIX: Removes forward-looking validation - uses only past volatility patterns
+        Enhanced Features:
+        - Dynamic horizons per sample based on volatility
+        - Adaptive threshold based on volatility regime change percentiles  
         - Signal strength based on historical volatility regime consistency
         - Creates continuous targets in [0, 1] range without future data leakage
+        
+        Args:
+            features_df: DataFrame with pattern features
+            dynamic_horizons: Array of horizons per sample (volatility-adjusted)
+            strength_threshold: Adaptive threshold for volatility strength filtering
         """
 
         volatility_change = features_df["volatility_regime_change"].values
@@ -207,10 +496,10 @@ class PatternTargetGenerator:
             extended_vol = np.std(extended_returns) if len(extended_returns) > 0 else 0
 
             if recent_vol > 0 and extended_vol > 0:
-                # Signal strength (how strong the regime change signal is)
+                # Signal strength using adaptive threshold instead of fixed percentile
                 signal_strength = np.abs(current_vol_signal)
-                signal_percentile = np.percentile(np.abs(volatility_change[~np.isnan(volatility_change)]), 90)
-                normalized_signal = min(signal_strength / (signal_percentile + 1e-8), 1.0)
+                # Use adaptive threshold instead of computing percentile each time
+                normalized_signal = min(signal_strength / (strength_threshold + 1e-8), 1.0)
 
                 # Historical regime change magnitude (recent vs extended past)
                 historical_vol_ratio = recent_vol / extended_vol
@@ -241,15 +530,27 @@ class PatternTargetGenerator:
 
         return normalized_targets
 
-    def _generate_trend_exhaustion_target(self, features_df: pd.DataFrame, horizon: int = 5) -> np.ndarray:
+    def _generate_trend_exhaustion_target(self, features_df: pd.DataFrame, 
+                                         dynamic_horizons: np.ndarray, 
+                                         strength_threshold: float) -> np.ndarray:
         """
-        FIXED: Generate trend exhaustion target with NO data leakage
+        Generate trend exhaustion target with dynamic horizons and adaptive thresholds
+        
+        Enhanced Features:
+        - Dynamic horizons per sample based on volatility
+        - Adaptive threshold based on trend exhaustion strength percentiles
+        - Leak-free temporal structure maintained
         
         METHODOLOGY (LEAK-FREE):
         1. Detect trend exhaustion using ONLY historical data (i-lookback to i-1)  
         2. Apply 5-day temporal gap (skip i to i+4)
-        3. Validate if trend reversal occurs in future period (i+5 to i+5+horizon)
+        3. Validate if trend reversal occurs in future period using dynamic horizon
         4. Target at position i predicts future trend reversal based on historical exhaustion
+        
+        Args:
+            features_df: DataFrame with pattern features
+            dynamic_horizons: Array of horizons per sample (volatility-adjusted)
+            strength_threshold: Adaptive threshold for trend exhaustion strength filtering
         """
 
         print("Generating LEAK-FREE trend exhaustion targets...")
@@ -261,7 +562,11 @@ class PatternTargetGenerator:
 
         # CRITICAL FIX: Add temporal gap to prevent data leakage
         temporal_gap = 5
-        max_valid_idx = len(features_df) - temporal_gap - horizon
+        # Use max dynamic horizon for conservative boundary calculation
+        max_horizon = int(np.max(dynamic_horizons))
+        max_valid_idx = len(features_df) - temporal_gap - max_horizon
+        
+        print(f"Trend exhaustion: using adaptive threshold {strength_threshold:.4f} and dynamic horizons (max={max_horizon})")
         
         for i in range(self.lookback_window, max_valid_idx):
             
@@ -287,7 +592,8 @@ class PatternTargetGenerator:
             # Pattern detection: Strong trend exhaustion signal in historical period?
             exhaustion_strength = np.mean(np.abs(historical_exhaustion_clean))
             
-            if exhaustion_strength < 0.2:  # No strong exhaustion signal detected
+            # Use adaptive threshold instead of fixed 0.2
+            if exhaustion_strength < strength_threshold:  # No strong exhaustion signal detected
                 targets[i] = 0.0
                 continue
             
@@ -305,9 +611,10 @@ class PatternTargetGenerator:
             gap_start = i
             gap_end = i + temporal_gap
             
-            # STEP 3: Future validation (i+gap to i+gap+horizon)
+            # STEP 3: Future validation using dynamic horizon for this sample
+            current_horizon = int(dynamic_horizons[i])
             future_start = gap_end
-            future_end = gap_end + horizon
+            future_end = gap_end + current_horizon
             
             if future_end >= len(returns_3d):
                 continue
@@ -333,15 +640,27 @@ class PatternTargetGenerator:
         print(f"Generated {np.sum(targets > 0)} positive trend exhaustion targets out of {max_valid_idx - self.lookback_window} valid samples")
         return targets
 
-    def _generate_volume_divergence_target(self, features_df: pd.DataFrame, horizon: int = 5) -> np.ndarray:
+    def _generate_volume_divergence_target(self, features_df: pd.DataFrame, 
+                                          dynamic_horizons: np.ndarray, 
+                                          strength_threshold: float) -> np.ndarray:
         """
-        FIXED: Generate volume divergence target with NO data leakage
+        Generate volume divergence target with dynamic horizons and adaptive thresholds
+        
+        Enhanced Features:
+        - Dynamic horizons per sample based on volatility
+        - Adaptive threshold based on volume divergence strength percentiles
+        - Leak-free temporal structure maintained
         
         METHODOLOGY (LEAK-FREE):
         1. Detect volume-price divergence using ONLY historical data (i-lookback to i-1)
         2. Apply 5-day temporal gap (skip i to i+4) 
-        3. Validate if divergence resolves in future period (i+5 to i+5+horizon)
+        3. Validate if divergence resolves in future period using dynamic horizon
         4. Target at position i predicts future price movement based on historical divergence
+        
+        Args:
+            features_df: DataFrame with pattern features
+            dynamic_horizons: Array of horizons per sample (volatility-adjusted)
+            strength_threshold: Adaptive threshold for volume divergence strength filtering
         """
 
         print("Generating LEAK-FREE volume divergence targets...")
@@ -353,7 +672,11 @@ class PatternTargetGenerator:
 
         # CRITICAL FIX: Add temporal gap to prevent data leakage
         temporal_gap = 5
-        max_valid_idx = len(features_df) - temporal_gap - horizon
+        # Use max dynamic horizon for conservative boundary calculation
+        max_horizon = int(np.max(dynamic_horizons))
+        max_valid_idx = len(features_df) - temporal_gap - max_horizon
+        
+        print(f"Volume divergence: using adaptive threshold {strength_threshold:.4f} and dynamic horizons (max={max_horizon})")
         
         for i in range(self.lookback_window, max_valid_idx):
             
@@ -377,7 +700,8 @@ class PatternTargetGenerator:
             # Pattern detection: Strong volume-price divergence in historical period?
             divergence_strength = np.mean(np.abs(historical_divergence_clean))
             
-            if divergence_strength < 0.15:  # No strong divergence signal detected
+            # Use adaptive threshold instead of fixed 0.15
+            if divergence_strength < strength_threshold:  # No strong divergence signal detected
                 targets[i] = 0.0
                 continue
             
@@ -385,9 +709,10 @@ class PatternTargetGenerator:
             gap_start = i
             gap_end = i + temporal_gap
             
-            # STEP 3: Future validation (i+gap to i+gap+horizon)  
+            # STEP 3: Future validation using dynamic horizon for this sample
+            current_horizon = int(dynamic_horizons[i])
             future_start = gap_end
-            future_end = gap_end + horizon
+            future_end = gap_end + current_horizon
             
             if future_end >= len(returns_1d):
                 continue
