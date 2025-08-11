@@ -398,6 +398,127 @@ class EnsembleManager:
 
         print(f"Rebalanced weights: {self.config.strategy_weights}")
 
+    def apply_pattern_verification(self, signals: pd.DataFrame, data: pd.DataFrame, 
+                                  pattern_strategy_name: str = "lstm_pattern_verification") -> pd.DataFrame:
+        """
+        Apply pattern verification to ensemble signals using LSTM strategy
+        
+        Args:
+            signals: Ensemble signals to verify
+            data: Market data for pattern analysis
+            pattern_strategy_name: Name of LSTM pattern verification strategy
+            
+        Returns:
+            Pattern-verified signals
+        """
+        if pattern_strategy_name not in self.strategies:
+            print(f"Warning: Pattern verification strategy '{pattern_strategy_name}' not found")
+            return signals
+            
+        pattern_strategy = self.strategies[pattern_strategy_name]
+        
+        # Check if strategy supports pattern verification
+        if hasattr(pattern_strategy, 'apply_pattern_verification'):
+            return pattern_strategy.apply_pattern_verification(signals, data)
+        else:
+            print(f"Warning: Strategy '{pattern_strategy_name}' does not support pattern verification")
+            return signals
+
+    def generate_integrated_signals(self, data: pd.DataFrame, 
+                                  pattern_verification: bool = True,
+                                  pattern_strategy_name: str = "lstm_pattern_verification") -> pd.DataFrame:
+        """
+        Generate ensemble signals with integrated pattern verification
+        
+        Args:
+            data: Market data with technical indicators
+            pattern_verification: Whether to apply pattern verification
+            pattern_strategy_name: Name of LSTM pattern verification strategy
+            
+        Returns:
+            Integrated ensemble signals with pattern verification
+        """
+        # Generate base ensemble signals
+        ensemble_signals = self.generate_ensemble_signals(data)
+        
+        if not pattern_verification:
+            return ensemble_signals
+            
+        # Apply pattern verification
+        verified_signals = self.apply_pattern_verification(
+            ensemble_signals, data, pattern_strategy_name
+        )
+        
+        # Add pattern verification metadata
+        if pattern_strategy_name in self.strategies:
+            pattern_strategy = self.strategies[pattern_strategy_name]
+            if hasattr(pattern_strategy, 'get_verification_stats'):
+                verified_signals.attrs['pattern_stats'] = pattern_strategy.get_verification_stats()
+        
+        return verified_signals
+
+    def register_lstm_pattern_strategy(self, lstm_strategy, weight: float = 0.0):
+        """
+        Register LSTM pattern strategy specifically for verification
+        
+        Args:
+            lstm_strategy: LSTM Pattern Strategy instance
+            weight: Weight for signal combination (0.0 for pure verification)
+        """
+        self.register_strategy(lstm_strategy)
+        
+        # Set weight to 0 if using for pure verification
+        if lstm_strategy.config.mode == "verification":
+            self.config.strategy_weights[lstm_strategy.name] = weight
+            print(f"Registered LSTM pattern strategy '{lstm_strategy.name}' as verification filter")
+        else:
+            self.config.strategy_weights[lstm_strategy.name] = weight
+            print(f"Registered LSTM pattern strategy '{lstm_strategy.name}' with weight {weight}")
+
+    def get_strategy_attribution(self, signals: pd.DataFrame) -> Dict[str, Any]:
+        """
+        Get detailed attribution showing contribution of each strategy including pattern verification
+        
+        Args:
+            signals: Ensemble signals to analyze
+            
+        Returns:
+            Strategy attribution analysis
+        """
+        attribution = {
+            'signal_summary': {
+                'total_signals': (signals['position'] != 0).sum(),
+                'long_signals': (signals['position'] > 0).sum(),
+                'short_signals': (signals['position'] < 0).sum(),
+                'avg_position_size': signals['position'].abs().mean(),
+                'max_position_size': signals['position'].abs().max()
+            },
+            'strategy_contributions': {},
+            'pattern_verification': {}
+        }
+        
+        # Analyze individual strategy contributions
+        for strategy_name in self.strategies.keys():
+            contrib_col = f"{strategy_name}_contribution"
+            if contrib_col in signals.columns:
+                contribution = signals[contrib_col]
+                attribution['strategy_contributions'][strategy_name] = {
+                    'avg_contribution': contribution.abs().mean(),
+                    'max_contribution': contribution.abs().max(),
+                    'active_periods': (contribution != 0).sum(),
+                    'contribution_std': contribution.std()
+                }
+        
+        # Pattern verification analysis
+        if 'pattern_stats' in signals.attrs:
+            attribution['pattern_verification'] = signals.attrs['pattern_stats']
+            
+        return attribution
+
     def __repr__(self) -> str:
         active_strategies = sum(1 for s in self.strategies.values() if s.config.enabled)
-        return f"EnsembleManager({len(self.strategies)} strategies, {active_strategies} active)"
+        pattern_strategies = sum(1 for s in self.strategies.values() 
+                               if hasattr(s, 'config') and getattr(s.config, 'mode', None) == 'verification')
+        
+        return (f"EnsembleManager({len(self.strategies)} strategies, {active_strategies} active, "
+                f"{pattern_strategies} pattern verification)")

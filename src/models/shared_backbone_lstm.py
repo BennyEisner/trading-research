@@ -124,45 +124,15 @@ class SharedBackboneLSTMBuilder:
             clipnorm=1.0  # Slightly relaxed gradient clipping
         )
         
-        # CORRELATION-FOCUSED LOSS FUNCTION - PRODUCTION FIX
-        def correlation_optimized_loss(y_true, y_pred):
-            """
-            FIXED: Direct correlation optimization loss function
-            
-            ROOT CAUSE RESOLUTION: MSE loss encouraged constant predictions because 
-            constant predictions minimize MSE when target variance is modest.
-            
-            SOLUTION: Directly optimize correlation instead of MSE.
-            """
-            # PRIMARY: Direct correlation maximization 
-            y_true_centered = y_true - tf.reduce_mean(y_true)
-            y_pred_centered = y_pred - tf.reduce_mean(y_pred)
-            
-            numerator = tf.reduce_sum(y_true_centered * y_pred_centered)
-            denominator = tf.sqrt(tf.reduce_sum(tf.square(y_true_centered)) * tf.reduce_sum(tf.square(y_pred_centered)))
-            
-            correlation = tf.cond(
-                tf.equal(denominator, 0.0),
-                lambda: 0.0,
-                lambda: numerator / denominator
-            )
-            
-            # SECONDARY: Prevent constant predictions with variance penalty
-            pred_variance = tf.math.reduce_variance(y_pred)
-            target_variance = tf.math.reduce_variance(y_true)
-            min_desired_variance = target_variance * 0.1  # 10% of target variance minimum
-            variance_penalty = tf.maximum(0.0, min_desired_variance - pred_variance)
-            
-            # TERTIARY: Small MSE component for numerical stability
-            mse_component = tf.reduce_mean(tf.square(y_true - y_pred))
-            
-            # Combined loss: maximize correlation + prevent constants + stability
-            # Weights: correlation (primary), variance penalty (5x), MSE (0.01x)
-            return -correlation + 5.0 * variance_penalty + 0.01 * mse_component
+        # STANDARD PATTERN DETECTION LOSS - Let natural correlation emerge
+        print(f"🎯 Using standard MSE loss for pattern detection training")
+        print(f"   - Target: Continuous pattern confidence scores [0,1]")  
+        print(f"   - Loss: MSE optimizes pattern prediction accuracy")
+        print(f"   - Natural correlation will emerge from proper pattern learning")
         
         model.compile(
             optimizer=optimizer,
-            loss=correlation_optimized_loss,  # FIXED: Direct correlation optimization
+            loss="mse",  # Standard MSE for continuous [0,1] pattern targets
             metrics=["mae", self._pattern_detection_accuracy, self._correlation_metric]
         )
         

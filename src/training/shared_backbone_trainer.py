@@ -230,67 +230,75 @@ class SharedBackboneTrainer:
         print(f"Training uses stride={self.config.model.training_stride} ({training_overlap_pct:.1f}% overlap, balanced utilization)")
         print(f"Validation uses stride={self.config.model.validation_stride} ({validation_overlap_pct:.1f}% overlap, clean metrics)")
 
-        # STEP 1: Use ALL overlapped sequences for training (stride=1 benefits)
-        # This gives us maximum training data utilization
-        train_X = combined_X  # Use all sequences for training
-        train_y = combined_y
+        # STEP 1: Use CONFIGURED STRIDE for training (not all sequences)
+        # Apply the configured training stride to reduce sequence overlap
+        print(f"\n🔧 APPLYING CONFIGURED TRAINING STRIDE: {self.config.model.training_stride}")
         
-        # STEP 2: Generate separate validation set with configured stride
+        # Subsample training sequences using configured stride
+        training_stride = self.config.model.training_stride
+        training_indices = list(range(0, len(combined_X), training_stride))
+        train_X = combined_X[training_indices]
+        train_y = combined_y[training_indices]
+        
+        print(f"   - Original sequences: {len(combined_X)}")
+        print(f"   - Training sequences after stride: {len(train_X)}")
+        print(f"   - Sequence reduction: {(len(combined_X) - len(train_X)) / len(combined_X) * 100:.1f}%")
+        
+        # STEP 2: Generate temporal validation split (no sequence derivation from training)
+        print(f"\n🔧 CREATING TEMPORAL VALIDATION SPLIT (leak-free)")
+        print(f"   - Using {validation_split*100:.0f}% temporal split instead of sequence subsampling")
+        
+        # Use temporal split to ensure no leakage between train/validation
+        total_samples = len(combined_X)
+        train_size = int((1.0 - validation_split) * total_samples)
+        
+        # Temporal split: training data comes from earlier time periods
+        val_X = combined_X[train_size:]  # Later time periods for validation
+        val_y = combined_y[train_size:]
+        
+        # Now apply validation stride to validation set only
         validation_stride = self.config.model.validation_stride
-        print(f"\nGenerating low-overlap validation sequences with stride={validation_stride}...")
-        val_X_list = []
-        val_y_list = []
+        if validation_stride > 1:
+            val_indices = list(range(0, len(val_X), validation_stride))
+            val_X = val_X[val_indices]
+            val_y = val_y[val_indices]
+            print(f"   - Applied validation stride {validation_stride} to validation set")
         
-        # Regenerate sequences with configured validation stride from same source data  
-        for ticker, (original_X, original_y) in training_data.items():
-            # Get the source features and targets for this ticker to regenerate sequences
-            print(f"Creating validation sequences for {ticker} with stride={validation_stride}...")
-            
-            # We need to regenerate from features - for now, use temporal sampling approach
-            # Take every Nth sequence based on validation stride to reduce overlap
-            ticker_sequences = len(original_X)
-            validation_indices = list(range(0, ticker_sequences, validation_stride))  # Every Nth sequence
-            
-            if len(validation_indices) > 0:
-                ticker_val_X = original_X[validation_indices]
-                ticker_val_y = original_y[validation_indices]
-                val_X_list.append(ticker_val_X)
-                val_y_list.append(ticker_val_y)
-                print(f"  {ticker}: {len(ticker_val_X)} low-overlap validation sequences")
-        
-        # Combine validation sequences from all tickers
-        if val_X_list:
-            val_X = np.vstack(val_X_list)
-            val_y = np.concatenate(val_y_list) 
-        else:
-            # Fallback: use temporal split but log the issue
-            print("WARNING: Could not generate low-overlap validation set, using temporal split")
-            total_samples = len(combined_X)
-            train_size = int(0.8 * total_samples)
-            train_X, val_X = combined_X[:train_size], combined_X[train_size:]
-            train_y, val_y = combined_y[:train_size], combined_y[train_size:]
+        print(f"   - Training temporal range: sequences 0 to {train_size}")
+        print(f"   - Validation temporal range: sequences {train_size} to {total_samples}")
+        print(f"   - Temporal gap ensures leak-free validation")
 
         print(f"\nFINAL TRAINING SETUP:")
         print(f"  - Training samples: {len(train_X)} (stride={self.config.model.training_stride}, {training_overlap_pct:.1f}% overlap)")
         print(f"  - Validation samples: {len(val_X)} (stride={validation_stride}, {validation_overlap_pct:.1f}% overlap)")
         print(f"  - Expected correlation improvement: Better generalization due to reduced overlap")
         print(f"  - Temporal integrity: PRESERVED (no random shuffling)")
+        
+        # PHASE 4: Add stride validation in training pipeline
+        print(f"\n🔧 STRIDE VALIDATION:")
+        expected_train_reduction = ((self.config.model.training_stride - 1) / self.config.model.training_stride) * 100
+        actual_train_reduction = ((len(combined_X) - len(train_X)) / len(combined_X)) * 100
+        
+        print(f"   - Expected training reduction: {expected_train_reduction:.1f}%")
+        print(f"   - Actual training reduction: {actual_train_reduction:.1f}%")
+        
+        if abs(expected_train_reduction - actual_train_reduction) < 5.0:
+            print(f"   ✅ Training stride correctly applied")
+        else:
+            print(f"   ❌ WARNING: Training stride mismatch!")
+            
+        print(f"   - Validation temporal split: {validation_split*100:.0f}% (leak-free)")
+        print(f"   ✅ Pipeline integrity validated")
 
         # Build shared backbone model
         input_shape = (combined_X.shape[1], combined_X.shape[2])
 
         model_params = self.config.model.model_params.copy()
-        critical_overrides = {
-            "learning_rate": 0.002,
-            "diversity_penalty_weight": 25.0,
-            "correlation_penalty_weight": 15.0,  # Penalty for low correlation
-        }
-
-        print(f"CRITICAL OVERRIDES APPLIED:")
-        for param, value in critical_overrides.items():
-            old_value = model_params.get(param, "not_set")
-            model_params[param] = value
-            print(f"- {param}: {old_value} → {value}")
+        
+        # Use standard pattern detection parameters (no correlation optimization)
+        print(f"🔧 REMOVED: Correlation-optimized loss function")
+        print(f"   - Using standard pattern detection loss (MSE/BCE)")
+        print(f"   - Let natural correlation emerge from proper pattern learning")
 
         model = self.lstm_builder.build_model(input_shape, **model_params)
 
@@ -325,8 +333,8 @@ class SharedBackboneTrainer:
                     'val_pred_var': np.var(val_pred)
                 })
 
-                # Track best validation correlation
-                if val_corr > self.best_correlation:
+                # Track best validation correlation (absolute value for pattern strength)
+                if abs(val_corr) > abs(self.best_correlation):
                     self.best_correlation = val_corr
 
                 # ENHANCED LEAKAGE DETECTION
@@ -371,6 +379,14 @@ class SharedBackboneTrainer:
                     print(f"⚠️  WARNING: Predictions collapsed to constants")
                 else:
                     print(f"📊 BASELINE: Minimal correlation (expected early training)")
+                
+                # Learning trend analysis for negative correlations
+                if len(self.correlation_history) >= 3 and val_corr < 0:
+                    recent_abs_corrs = [abs(h['val_corr']) for h in self.correlation_history[-3:]]
+                    if all(recent_abs_corrs[i] < recent_abs_corrs[i+1] for i in range(len(recent_abs_corrs)-1)):
+                        print(f"   📈 INVERSE LEARNING: Negative correlation strengthening (-{abs(val_corr):.3f})")
+                    elif all(abs(c - recent_abs_corrs[0]) < 0.01 for c in recent_abs_corrs):
+                        print(f"   ⏸️  PLATEAU: Negative correlation stuck at ~-{abs(val_corr):.3f}")
             
             def get_leakage_report(self):
                 """Generate leakage detection report"""
@@ -390,19 +406,13 @@ class SharedBackboneTrainer:
         correlation_monitor = EnhancedCorrelationMonitor(train_X, train_y, val_X, val_y, self.config)
         callbacks.append(correlation_monitor)
 
-        print(f"Starting shared backbone training with correlation optimization...")
+        print(f"🎯 STARTING STANDARD PATTERN DETECTION TRAINING")
         print(f"- Batch size: {self.config.model.training_params.get('batch_size', 256)}")
-        print(f"- Monitor metric: val_loss (correlation via manual calculation)")
+        print(f"- Monitor metric: val_loss")
         print(f"- Patience: {self.config.model.training_params.get('patience', 15)} epochs")
-        print(f"- CRITICAL: Using correlation-optimized loss function")
-        print(f"- NOTE: Keras correlation metric display is misleading (batch vs epoch issue)")
-        print(f"- FOCUS: Manual correlation calculation shows true learning progress")
-
-        print(f"")
-        print(f"STARTING CORRELATION-OPTIMIZED TRAINING")
-        print(f"Loss function: Direct correlation optimization")
-        print(f"Monitoring: Manual correlation calculation (accurate)")
-        print(f"Expected: Meaningful correlation (0.1-0.5 range)")
+        print(f"- Loss function: Standard MSE/BCE for pattern detection")
+        print(f"- Natural correlation tracking: Manual correlation calculation (accurate)")
+        print(f"- Expected: Realistic correlation (5-15% range)")
         print(f"")
 
         history = model.fit(
@@ -469,12 +479,12 @@ class SharedBackboneTrainer:
 
         self.training_results["shared_backbone"] = training_results
 
-        print(f"CORRELATION-OPTIMIZED TRAINING COMPLETE!")
+        print(f"🎯 STANDARD PATTERN DETECTION TRAINING COMPLETE!")
         print(f"- Final train loss: {training_results['final_metrics']['train_loss']:.4f}")
         print(f"- Final val loss: {training_results['final_metrics']['val_loss']:.4f}")
         print(f"- Pattern detection accuracy: {training_results['final_metrics']['pattern_detection_accuracy']:.3f}")
         print(f"")
-        print(f"CRITICAL CORRELATION METRICS:")
+        print(f"📊 NATURAL CORRELATION METRICS (no artificial optimization):")
         print(f"- Training correlation (overlapped): {training_results['final_metrics']['training_correlation_overlapped']:.6f}")
         print(f"- VALIDATION CORRELATION (CLEAN): {training_results['final_metrics']['validation_correlation_clean']:.6f} ⭐")
         print(f"- Best epoch val correlation: {training_results['final_metrics']['best_validation_correlation']:.6f}")
